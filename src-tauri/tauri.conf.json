@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "伴奏歌词",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "io.github.dylantlwu.banzou",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -47,6 +47,14 @@
     "macOS": {
       "signingIdentity": "-",
       "hardenedRuntime": false
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCREI1NDJDOTlDNDFCMzgKUldRNEc4U1pMRlRibTdzVUVCWEZCbnh1MEt4Yy9pTit3cEI3ZXZReWxjSEZDUGQ0K0RQNDlxeU4K",
+      "endpoints": [
+        "https://github.com/dylantlwu/banzou/releases/latest/download/latest.json"
+      ]
     }
   }
 }

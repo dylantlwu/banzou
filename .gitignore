@@ -35,3 +35,6 @@ dist-ssr
 *.mov
 *.lrc
 录音/
+
+# 打包产物（scripts/release.mjs）
+release/

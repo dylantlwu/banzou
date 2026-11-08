@@ -5,6 +5,7 @@ import {
   estimateLatencyMs,
 } from "../audio/calibration";
 import type { Settings } from "../settings";
+import { type UpdateInfo, checkForUpdate, currentVersion, describeUpdateError } from "../update/updater";
 import { Btn } from "./Btn";
 
 interface Props {
@@ -13,10 +14,26 @@ interface Props {
   onClose: () => void;
   libraryRoot: string | null;
   onChooseLibrary: () => void;
+  onUpdateFound: (update: UpdateInfo) => void;
 }
 
-export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onChooseLibrary }: Props) {
+export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onChooseLibrary, onUpdateFound }: Props) {
   const [calibrating, setCalibrating] = useState(false);
+  const [version, setVersion] = useState("");
+  const [checkState, setCheckState] = useState<{ busy: boolean; text: string; error?: boolean }>({ busy: false, text: "" });
+  useEffect(() => {
+    void currentVersion().then(setVersion);
+  }, []);
+  const checkUpdate = async () => {
+    setCheckState({ busy: true, text: "正在检查…" });
+    try {
+      const u = await checkForUpdate();
+      if (u) onUpdateFound(u);
+      else setCheckState({ busy: false, text: "已经是最新版" });
+    } catch (e) {
+      setCheckState({ busy: false, text: describeUpdateError(e), error: true });
+    }
+  };
 
   useEffect(() => {
     if (calibrating) return;
@@ -91,6 +108,17 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
                 <span className="muted">ms</span>
               </div>
               <p className="muted small">按空格通常比真正开唱晚一点。打出来整体偏晚就调大，偏早就调小。</p>
+            </div>
+
+            <div className="field">
+              <label>版本</label>
+              <div className="field-row">
+                <span>{version || "—"}</span>
+                <Btn className="ghost" onClick={() => void checkUpdate()} disabled={checkState.busy}>
+                  检查更新
+                </Btn>
+                {checkState.text && <span className={checkState.error ? "small error-text" : "muted small"}>{checkState.text}</span>}
+              </div>
             </div>
 
             <div className="dialog-actions">

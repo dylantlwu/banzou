@@ -30,6 +30,15 @@ xattr -dr com.apple.quarantine /Applications/伴奏歌词.app
 
 想直播的话还要装 [OBS Studio](https://obsproject.com/)（30 或更新版本），装好就行，不用设置。
 
+### 更新
+
+从 0.2.0 开始，应用每次打开时会去 GitHub 看有没有新版本。有的话右下角会提示，点「更新」，下载装好后点「现在重启」就是新版本了，不用再走一遍上面的第 3 步。也可以在「设置 → 版本」里点「检查更新」。
+
+- 每个更新包都带签名，应用会先核对签名，对不上就不装
+- 更新后第一次录音时 macOS 可能会再问一次麦克风权限，点「允许」（没有付费的 Apple 签名，macOS 会把新版本当成新应用）
+- 还在用 0.1.0 的话，要手动下载一次新版替换，之后就能自动更新了
+- 不想更新就点「以后再说」，下次打开还会提示
+
 ### 自己编译
 
 想改代码，或者不想用下载版，可以自己编译一次（大约 5 分钟）。
@@ -53,6 +62,8 @@ npm run tauri build
 ```
 
 完成后应用在 `src-tauri/target/release/bundle/macos/伴奏歌词.app`。把它拖进「应用程序」文件夹，就和普通应用一样打开（自己编译的不需要第 3 步）。
+
+自己编译的版本也会收到更新提示；点「更新」会换成 GitHub 上的官方版本，想保留自己的改动就点「以后再说」。
 
 ---
 
@@ -299,7 +310,7 @@ npm run tauri build
 | 录音、修音、导出 | 素材文件夹里的 `录音/歌名/` |
 | 设置、练声记录、推流码 | `~/Library/Application Support/io.github.dylantlwu.banzou/` |
 
-应用不联网，不上传任何东西。唯一的例外是直播：推流到你填的平台。
+应用不上传任何东西。联网的只有两处：打开时去 GitHub 检查有没有新版本；直播时推流到你填的平台。
 
 ---
 
@@ -314,6 +325,10 @@ npm run tauri build
 **「自动打轴」「智能对齐」「引导人声」按钮没有出现。** 这些都需要 `歌名 - 人声.wav` 原唱人声文件。
 
 **录音时 AirPods 的音质突然变差。** 那是 AirPods 的麦克风被打开了。录音栏里选 Mac 内置麦克风或别的麦克风，应用默认就不会选蓝牙麦克风。
+
+**更新时提示「连不上 GitHub」。** 检查网络；在国内访问 GitHub 不稳定时，可以稍后在「设置 → 版本」里再点「检查更新」，或者到 [Releases 页面](https://github.com/dylantlwu/banzou/releases/latest)手动下载。
+
+**更新后又问麦克风权限。** 正常，点「允许」就行，见[更新](#更新)。
 
 **第一次录音没反应。** macOS 会弹出麦克风权限请求，点「允许」。点过「不允许」的话，到「系统设置 → 隐私与安全性 → 麦克风」里打开「伴奏歌词」。
 
@@ -342,6 +357,14 @@ npm run test:ui        # 然后打开 http://localhost:1420/?test
 - 测直播叠加层要另外运行 `src-tauri/target/release/examples/devlive`
 
 改完东西、打包前，按 [docs/测试清单.md](docs/测试清单.md) 把应用实际用一遍。需求和设计见 [docs/PRD.md](docs/PRD.md)。
+
+**发新版本**（维护者）
+
+1. 三处版本号改成一样：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`
+2. 在 [CHANGELOG.md](CHANGELOG.md) 最上面加「## 版本号」和改动，这段会显示在用户的更新提示里
+3. 按测试清单测一遍，然后运行 `node scripts/release.mjs --publish`：打包、签名，并发布到 GitHub Releases（需要先 `gh auth login`）
+
+更新签名用的私钥在 `~/.tauri/banzou.key`，不在仓库里。**要备份好，不能丢**：丢了的话，已安装的用户收不到之后的自动更新，只能手动下载一次。公钥写在 `tauri.conf.json` 里。
 
 **目录**
 

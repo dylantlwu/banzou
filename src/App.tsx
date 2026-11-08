@@ -13,6 +13,8 @@ import { TunePage } from "./components/TunePage";
 import { takeTracks } from "./takes/takes";
 import { useRecording } from "./takes/useRecording";
 import { useTakes } from "./takes/useTakes";
+import { UpdateCard } from "./components/UpdateCard";
+import { type UpdateInfo, checkForUpdate, shouldAutoCheck } from "./update/updater";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { useLiveSync } from "./live/liveSync";
 import { useGoLive } from "./live/useGoLive";
@@ -80,6 +82,17 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  // 启动几秒后悄悄检查一次更新；没网或出错都不打扰
+  useEffect(() => {
+    if (!shouldAutoCheck()) return;
+    const id = window.setTimeout(() => {
+      checkForUpdate()
+        .then((u) => u && setUpdate(u))
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearTimeout(id);
+  }, []);
   const dialogOpen = settingsOpen || liveOpen || compOpen;
   useEffect(() => {
     loadSettings()
@@ -1021,8 +1034,13 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
           libraryRoot={library?.root ?? null}
           onChooseLibrary={() => void chooseLibrary()}
+          onUpdateFound={(u) => {
+            setSettingsOpen(false);
+            setUpdate(u);
+          }}
         />
       )}
+      {update && <UpdateCard key={update.version} update={update} onClose={() => setUpdate(null)} />}
     </div>
   );
 }
