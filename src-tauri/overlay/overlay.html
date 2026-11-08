@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>直播歌词</title>
+<style>
+  :root { --size: 56px; --color: #ffffff; --stroke: 6px; --next-scale: 0.62; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  body.bg-green { background: #00b140; }
+  body.bg-black { background: #000; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    padding: 0 4vw 6vh; box-sizing: border-box;
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  body.pos-center { justify-content: center; padding-bottom: 0; }
+  body.pos-top { justify-content: flex-start; padding: 6vh 4vw 0; }
+  .line {
+    max-width: 92vw; text-align: center; font-weight: 700; line-height: 1.3; color: var(--color);
+    -webkit-text-stroke: var(--stroke) rgba(0, 0, 0, 0.82); paint-order: stroke fill;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    overflow-wrap: anywhere;
+  }
+  #current { font-size: min(var(--size), 8vw); min-height: 1.3em; }
+  #next { font-size: calc(min(var(--size), 8vw) * var(--next-scale)); opacity: 0.78; margin-top: 0.35em; min-height: 1.3em; }
+  .enter { opacity: 0 !important; transform: translateY(0.4em); }
+  #hint { position: fixed; left: 12px; bottom: 10px; font-size: 13px; color: rgba(255, 255, 255, 0.7); display: none; }
+  body.bg-green #hint, body.bg-black #hint { display: block; }
+</style>
+</head>
+<body>
+  <div id="current" class="line"></div>
+  <div id="next" class="line"></div>
+  <div id="hint">等待「伴奏歌词」…</div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const bg = params.get("bg") || "transparent";
+  document.body.classList.add("bg-" + bg);
+  const curEl = document.getElementById("current");
+  const nextEl = document.getElementById("next");
+  const hint = document.getElementById("hint");
+  let lines = [];
+  let pos = { playing: false, position: 0, rate: 1, sentAt: Date.now() };
+  let shown = { cur: null, next: null };
+
+  function applyStyle(style) {
+    if (!style) return;
+    const root = document.documentElement.style;
+    const size = Number(params.get("size") || style.fontSize || 56);
+    root.setProperty("--size", size + "px");
+    root.setProperty("--color", params.get("color") || style.color || "#ffffff");
+    root.setProperty("--stroke", (style.stroke === false ? 0 : Math.max(2, Math.round(size / 9))) + "px");
+    nextEl.style.display = style.showNext === false ? "none" : "";
+    document.body.classList.remove("pos-bottom", "pos-center", "pos-top");
+    document.body.classList.add("pos-" + (params.get("position") || style.position || "bottom"));
+  }
+
+  function now() {
+    if (!pos.playing) return pos.position;
+    return pos.position + ((Date.now() - pos.sentAt) / 1000) * (pos.rate || 1);
+  }
+
+  /** 最后一个开始时间 <= t 的行 */
+  function findIndex(t) {
+    let lo = 0, hi = lines.length - 1, found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (lines[mid].t <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return found;
+  }
+
+  function setText(el, text, key) {
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    el.classList.add("enter");
+    el.textContent = text;
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("enter")));
+  }
+
+  function render() {
+    const i = findIndex(now());
+    const cur = i >= 0 ? lines[i] : null;
+    let n = null;
+    for (let k = i + 1; k < lines.length; k++) if (lines[k].text) { n = lines[k]; break; }
+    setText(curEl, cur ? cur.text : "", "c" + i);
+    setText(nextEl, n ? n.text : "", "n" + (n ? n.t : "-"));
+    requestAnimationFrame(render);
+  }
+
+  function connect() {
+    const es = new EventSource("/events");
+    es.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "full") {
+        lines = (msg.lines || []).filter((l) => typeof l.t === "number").sort((a, b) => a.t - b.t);
+        if (msg.audioRate && window.__setAudioRate) window.__setAudioRate(msg.audioRate);
+        applyStyle(msg.style);
+        hint.textContent = msg.title ? "" : "等待「伴奏歌词」…";
+        curEl.dataset.key = ""; nextEl.dataset.key = "";
+      } else if (msg.type === "pos") {
+        pos = msg;
+      }
+    };
+    es.onerror = () => { hint.textContent = "连不上「伴奏歌词」，打开应用后会自动连上"; };
+  }
+
+  connect();
+  requestAnimationFrame(render);
+
+  // ---------- 直播声音（地址带 ?audio=1）：播放 app 推过来的「伴奏 + 修过的人声」 ----------
+  // 在 OBS 浏览器源里勾选「通过 OBS 控制音频」，声音就进 OBS 的混音器了
+  if (params.get("audio") === "1") startAudio();
+
+  function startAudio() {
+    const PLAYER = `
+      class P extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this.size = 1 << 18; this.L = new Float32Array(this.size); this.R = new Float32Array(this.size);
+          this.w = 0; this.r = 0; this.started = false;
+          this.port.onmessage = (e) => {
+            const a = new Int16Array(e.data);
+            for (let i = 0; i + 1 < a.length; i += 2) {
+              const k = this.w & (this.size - 1);
+              this.L[k] = a[i] / 32768; this.R[k] = a[i + 1] / 32768; this.w++;
+            }
+            // 积压太多（比如页面卡了一下）就追上来，延迟不越积越大
+            if (this.w - this.r > sampleRate * 0.35) this.r = this.w - Math.round(sampleRate * 0.12);
+          };
+        }
+        process(_, outputs) {
+          const L = outputs[0][0], R = outputs[0][1] || L;
+          if (!this.started) {
+            if (this.w - this.r < sampleRate * 0.1) { L.fill(0); R.fill(0); return true; }
+            this.started = true;
+          }
+          for (let i = 0; i < L.length; i++) {
+            if (this.r < this.w) { const k = this.r & (this.size - 1); L[i] = this.L[k]; R[i] = this.R[k]; this.r++; }
+            else { L[i] = 0; R[i] = 0; this.started = false; }
+          }
+          return true;
+        }
+      }
+      registerProcessor("banzou-player", P);`;
+    let ctx = null;
+    let node = null;
+    let rate = 48000;
+
+    async function ensureContext(sr) {
+      if (ctx && rate === sr) return;
+      if (ctx) await ctx.close();
+      rate = sr;
+      ctx = new AudioContext({ sampleRate: sr });
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([PLAYER], { type: "application/javascript" })));
+      node = new AudioWorkletNode(ctx, "banzou-player", { numberOfOutputs: 1, outputChannelCount: [2] });
+      node.connect(ctx.destination);
+      ctx.resume();
+    }
+    // 普通浏览器要点一下才允许出声；OBS 里不用
+    document.addEventListener("click", () => ctx && ctx.resume());
+    window.__setAudioRate = (sr) => { if (sr && sr !== rate) ensureContext(sr); };
+
+    async function pull() {
+      try {
+        await ensureContext(rate);
+        const res = await fetch("/audio-stream");
+        const reader = res.body.getReader();
+        let rest = new Uint8Array(0);
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          const all = new Uint8Array(rest.length + value.length);
+          all.set(rest); all.set(value, rest.length);
+          const usable = all.length - (all.length % 4);
+          if (usable > 0) node.port.postMessage(all.slice(0, usable).buffer, []);
+          rest = all.slice(usable);
+        }
+      } catch (e) {}
+      setTimeout(pull, 1000);
+    }
+    pull();
+  }
+})();
+</script>
+</body>
+</html>
