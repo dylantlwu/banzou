@@ -43,6 +43,10 @@
     "shortDescription": "伴奏、歌词、录唱、修音、练声、直播",
     "externalBin": [
       "binaries/banzou-helper"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": false
+    }
   }
 }

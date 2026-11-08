@@ -2,7 +2,7 @@
 
 给唱歌的人用的 macOS 应用：放伴奏、歌词跟着滚、录唱、修音、每天练声、一键开直播。
 
-> **English**: Banzou is a macOS app for singers. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. See [安装](#安装) for build steps.
+> **English**: Banzou is a macOS app for singers. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. Download the latest build (Apple silicon) from [Releases](https://github.com/dylantlwu/banzou/releases/latest). It is not notarized, so on first launch allow it under System Settings → Privacy & Security → Open Anyway.
 
 **目录**：[安装](#安装) · [5 分钟上手](#5-分钟上手) · [准备素材](#准备素材) · [唱歌](#唱歌) · [歌词](#歌词) · [耳机延迟](#耳机延迟校准) · [录唱](#录唱) · [修音](#修音) · [练声](#练声) · [直播](#直播) · [快捷键](#快捷键) · [常见问题](#常见问题) · [开发](#开发)
 
@@ -10,7 +10,29 @@
 
 ## 安装
 
-目前没有现成的下载包，需要自己编译一次（大约 5 分钟，之后不用再弄）。
+### 下载（推荐）
+
+只支持 Apple 芯片的 Mac（M1 或更新）。在 macOS 26 上测试过，更早的系统没测过。
+
+1. 打开 [Releases 页面](https://github.com/dylantlwu/banzou/releases/latest)，下载 `Banzou-版本号-macOS-arm64.zip`
+2. 双击解压，得到「伴奏歌词」，把它拖进「应用程序」文件夹
+3. **第一次打开要多做一步**。这个应用没有经过 Apple 公证（需要付费开发者账号），所以第一次双击会提示「未打开“伴奏歌词”，Apple 无法验证…」：
+   - 点「完成」，**不要点「移到废纸篓」**
+   - 打开「系统设置 → 隐私与安全性」，拉到最下面，看到「已阻止“伴奏歌词”…」，点「仍要打开」，输入开机密码确认
+   - 再双击打开就行，以后不会再问
+4. 第一次录音、练声或直播时会问能不能用麦克风，点「允许」
+
+如果第 3 步在「隐私与安全性」里找不到「仍要打开」，也可以在「终端」里运行下面这行，然后再双击打开：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/伴奏歌词.app
+```
+
+想直播的话还要装 [OBS Studio](https://obsproject.com/)（30 或更新版本），装好就行，不用设置。
+
+### 自己编译
+
+想改代码，或者不想用下载版，可以自己编译一次（大约 5 分钟）。
 
 **需要**
 
@@ -30,9 +52,7 @@ npm install
 npm run tauri build
 ```
 
-完成后应用在 `src-tauri/target/release/bundle/macos/伴奏歌词.app`。把它拖进「应用程序」文件夹，就和普通应用一样打开。
-
-想直播的话还要装 [OBS Studio](https://obsproject.com/)（30 或更新版本），装好就行，不用设置。
+完成后应用在 `src-tauri/target/release/bundle/macos/伴奏歌词.app`。把它拖进「应用程序」文件夹，就和普通应用一样打开（自己编译的不需要第 3 步）。
 
 ---
 
@@ -284,6 +304,8 @@ npm run tauri build
 ---
 
 ## 常见问题
+
+**打开时提示「Apple 无法验证」或「已损坏」。** 下载版没有经过 Apple 公证，第一次要手动放行，见[安装](#下载推荐)第 3 步。
 
 **打开后左边是空的。** 检查文件名是不是「歌名 - 伴奏.mp3」这样，中间是「空格 - 空格」；文件要放在文件夹第一层。改好后点「重新扫描」。
 
