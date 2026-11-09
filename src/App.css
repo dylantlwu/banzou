@@ -9,6 +9,16 @@
   --hover: #efede8;
   --error: #b91c1c;
   --wave: #c9c4ba;
+  /* 状态色：红绿色弱也分得清（不用绿色；好 = 蓝、一般 = 黄、差 = 红） */
+  --good: #2563eb;
+  --ok: #e69f00;
+  --bad: #ef4444;
+  --good-soft: #bfdbfe;
+  /* 音高曲线：原唱灰、我的蓝、跑调橙、修后黑（深色模式白） */
+  --pitch-ref: rgba(128, 128, 128, 0.55);
+  --pitch-mine: #2563eb;
+  --pitch-off: #e69f00;
+  --pitch-tuned: #1c1b19;
 
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
   font-size: 14px;
@@ -29,6 +39,14 @@
     --hover: #262522;
     --error: #f87171;
     --wave: #4a4741;
+    --good: #60a5fa;
+    --ok: #fcd34d;
+    --bad: #dc2626;
+    --good-soft: #1e3a5f;
+    --pitch-ref: rgba(150, 150, 150, 0.5);
+    --pitch-mine: #60a5fa;
+    --pitch-off: #f0b429;
+    --pitch-tuned: #f5f3ef;
   }
 }
 
@@ -1099,11 +1117,11 @@ p {
 }
 
 .meter-fill.good {
-  background: #2f9e44;
+  background: var(--good);
 }
 
 .meter-fill.clip {
-  background: #e03131;
+  background: var(--bad);
 }
 
 .route {
@@ -1124,7 +1142,7 @@ p {
 }
 
 .rec-msg.notice {
-  color: #2f9e44;
+  color: var(--good);
 }
 
 .rec-dot {
@@ -1340,19 +1358,21 @@ p {
 }
 
 .lg.ref {
-  background: rgba(128, 128, 128, 0.55);
+  background: var(--pitch-ref);
+  height: 5px;
 }
 
 .lg.mine {
-  background: #3b82f6;
+  background: var(--pitch-mine);
 }
 
 .lg.off {
-  background: #e03131;
+  background: var(--pitch-off);
+  height: 4px;
 }
 
 .lg.tuned {
-  background: #2f9e44;
+  background: var(--pitch-tuned);
 }
 
 .tune-controls,
@@ -1654,15 +1674,15 @@ p {
 }
 
 .cents.good {
-  color: #2f9e44;
+  color: var(--good);
 }
 
 .cents.ok {
-  color: #f59f00;
+  color: var(--ok);
 }
 
 .cents.bad {
-  color: #e03131;
+  color: var(--bad);
 }
 
 .practice-summary {
@@ -1698,11 +1718,11 @@ p {
 }
 
 .day.some {
-  background: #a5d8a5;
+  background: var(--good-soft);
 }
 
 .day.full {
-  background: #2f9e44;
+  background: var(--good);
 }
 
 .spark {

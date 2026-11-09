@@ -38,7 +38,7 @@ interface Props {
   cursor?: string;
 }
 
-/** 钢琴卷帘：灰 = 原唱、彩 = 我的（跑调 > 30 音分标红）、绿 = 修后（PRD 4.5） */
+/** 钢琴卷帘：灰 = 原唱、蓝 = 我的（跑调 > 30 音分标橙、加粗）、黑/白 = 修后（PRD 4.5） */
 export function PitchRoll({ data, view, time, onSeek, onView, overlay, onPointer, onDoubleClick, onContextMenu, cursor }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -98,29 +98,35 @@ export function PitchRoll({ data, view, time, onSeek, onView, overlay, onPointer
         if (cursor < view.start + view.len) ctx.fillRect(xOf(cursor), 0, w - xOf(cursor), h);
       }
 
-      const drawCurve = (values: Float64Array, t0: number, hop: number, stroke: (i: number) => string, width: number) => {
+      const drawCurve = (values: Float64Array, t0: number, hop: number, stroke: (i: number) => string, width: (i: number) => number) => {
         const i0 = Math.max(0, Math.floor((view.start - t0) / hop) - 1);
         const i1 = Math.min(values.length, Math.ceil((view.start + view.len - t0) / hop) + 1);
-        ctx.lineWidth = width;
         ctx.lineCap = "round";
         let prevColor = "";
+        let prevWidth = 0;
+        let prevV = NaN;
         let open = false;
         for (let i = i0; i < i1; i++) {
           const v = values[i];
-          if (Number.isNaN(v)) {
+          // 不发声断开；相邻两帧跳超过 5 个半音（检测跳变）也断开，不画竖线
+          if (Number.isNaN(v) || (open && Math.abs(v - prevV) > 5)) {
             if (open) ctx.stroke();
             open = false;
-            continue;
+            if (Number.isNaN(v)) continue;
           }
+          prevV = v;
           const c = stroke(i);
+          const lw = width(i);
           const x = xOf(t0 + i * hop);
           const y = yOf(v);
-          if (!open || c !== prevColor) {
+          if (!open || c !== prevColor || lw !== prevWidth) {
             if (open) {
               ctx.lineTo(x, y);
               ctx.stroke();
             }
             ctx.strokeStyle = c;
+            ctx.lineWidth = lw;
+            prevWidth = lw;
             ctx.beginPath();
             ctx.moveTo(x, y);
             open = true;
@@ -132,15 +138,22 @@ export function PitchRoll({ data, view, time, onSeek, onView, overlay, onPointer
         if (open) ctx.stroke();
       };
 
-      if (data.ref) drawCurve(data.ref, 0, data.refHop, () => "rgba(128,128,128,0.55)", 3);
+      // 颜色见 App.css 的 --pitch-*：红绿色弱也分得清（跑调橙色且更粗，修后用文字色）
+      const refColor = color("--pitch-ref", "rgba(128,128,128,0.55)");
+      const mineColor = color("--pitch-mine", "#2563eb");
+      const offColor = color("--pitch-off", "#e69f00");
+      const tunedColor = color("--pitch-tuned", "#1c1b19");
+      const isOff = (i: number) => !Number.isNaN(data.target[i]) && Math.abs(data.center[i] - data.target[i]) * 100 > OFF_CENTS;
+      if (data.ref) drawCurve(data.ref, 0, data.refHop, () => refColor, () => 3);
+      const mineWidth = data.tuned ? 1.5 : 2;
       drawCurve(
         data.mine,
         data.start,
         data.hop,
-        (i) => (!Number.isNaN(data.target[i]) && Math.abs(data.center[i] - data.target[i]) * 100 > OFF_CENTS ? "#e03131" : "#3b82f6"),
-        data.tuned ? 1.5 : 2,
+        (i) => (isOff(i) ? offColor : mineColor),
+        (i) => (isOff(i) ? mineWidth + 1.5 : mineWidth),
       );
-      if (data.tuned) drawCurve(data.tuned, data.start, data.hop, () => "#2f9e44", 2);
+      if (data.tuned) drawCurve(data.tuned, data.start, data.hop, () => tunedColor, () => 2);
     }
 
     overlay?.(ctx, xOf, yOf);

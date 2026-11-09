@@ -10,9 +10,10 @@ interface Props {
   onExit: () => void;
 }
 
-const GRADE_COLOR: Record<string, string> = { good: "#2f9e44", ok: "#f59f00", bad: "#e03131", miss: "#adb5bd" };
+/** 打分颜色读 App.css 的 --good / --ok / --bad（蓝 / 黄 / 红，红绿色弱也分得清） */
+const GRADE_VAR: Record<string, [string, string]> = { good: ["--good", "#2563eb"], ok: ["--ok", "#e69f00"], bad: ["--bad", "#ef4444"], miss: ["--muted", "#adb5bd"] };
 
-/** 实时画面：目标音（灰条，打分后变色）+ 我唱的音高（蓝线） */
+/** 实时画面：目标音（灰条，打分后变蓝 / 黄 / 红）+ 我唱的音高（文字色的线） */
 function PracticeView({ api, range }: { api: PracticeApi; range: Range }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const targetsRef = useRef<Target[]>(api.targets);
@@ -37,6 +38,8 @@ function PracticeView({ api, range }: { api: PracticeApi; range: Range }) {
       const style = getComputedStyle(canvas);
       const line = style.getPropertyValue("--line").trim() || "#ddd";
       const muted = style.getPropertyValue("--muted").trim() || "#888";
+      const text = style.getPropertyValue("--text").trim() || "#1c1b19";
+      const gradeColor = (g: string) => style.getPropertyValue(GRADE_VAR[g][0]).trim() || GRADE_VAR[g][1];
       const t = api.now();
       const lat = api.latency();
       const t0 = t - 5;
@@ -61,20 +64,20 @@ function PracticeView({ api, range }: { api: PracticeApi; range: Range }) {
       // 目标音
       const unit = h / (hi - lo);
       for (const tg of targets) {
-        ctx.fillStyle = tg.grade ? GRADE_COLOR[tg.grade] : "rgba(128,128,128,0.35)";
+        ctx.fillStyle = tg.grade ? gradeColor(tg.grade) : "rgba(128,128,128,0.35)";
         ctx.globalAlpha = tg.grade ? 0.55 : 1;
         ctx.beginPath();
         ctx.roundRect(x(tg.start), y(tg.midi) - unit * 0.4, Math.max(3, x(tg.end) - x(tg.start) - 2), unit * 0.8, 4);
         ctx.fill();
         ctx.globalAlpha = 1;
         if (tg.grade && tg.grade !== "miss" && tg.cents !== null && tg.cents !== undefined && x(tg.end) - x(tg.start) > 28) {
-          ctx.fillStyle = GRADE_COLOR[tg.grade];
+          ctx.fillStyle = gradeColor(tg.grade);
           ctx.fillText(`${tg.cents > 0 ? "+" : ""}${tg.cents}`, x(tg.start) + 2, y(tg.midi) - unit * 0.5 - 2);
         }
       }
       // 我唱的（扣掉延迟，和目标对齐；按最近的目标折八度）
       const frames = api.frames();
-      ctx.strokeStyle = "#3b82f6";
+      ctx.strokeStyle = text;
       ctx.lineWidth = 2.5;
       ctx.lineCap = "round";
       let open = false;

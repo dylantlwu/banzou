@@ -1,5 +1,6 @@
 //! 人声音高检测：YIN（差分函数用 FFT 互相关加速），10ms 一帧。
-//! 输出每帧基频（Hz，0 = 不发声）和可信度；后处理去掉八度跳变和太短的发声段。
+//! 输出每帧基频（Hz，0 = 不发声）和可信度；后处理去掉八度跳变、太短的发声段，
+//! 以及和前后旋律差太远的短片段（分离出来的人声里常漏进伴奏的低音）。
 
 use rustfft::{num_complex::Complex32, FftPlanner};
 use serde::{Deserialize, Serialize};
@@ -130,8 +131,85 @@ pub fn detect(samples: &[f32], sr: u32) -> PitchTrack {
     PitchTrack { hop: HOP_SECONDS, f0, conf }
 }
 
-/// 后处理：八度跳变折回、3 帧中值、去掉短于 40ms 的发声段
+/// 后处理：八度跳变折回、3 帧中值、去掉短于 40ms 的发声段，最后按上下文检查短片段
 fn cleanup(f0: &mut [f32], conf: &mut [f32]) {
+    basic_cleanup(f0, conf);
+    context_fix(f0, conf);
+}
+
+fn midi(f: f32) -> f32 {
+    69.0 + 12.0 * (f / 440.0).log2()
+}
+
+fn median(mut v: Vec<f32>) -> f32 {
+    v.sort_by(f32::total_cmp);
+    v[v.len() / 2]
+}
+
+/// 短于这个长度的片段要过上下文检查（帧，10ms 一帧）
+const SHORT_SEGMENT: usize = 35;
+/// 上下文：前后各 1.5 秒
+const CONTEXT: usize = 150;
+
+/// 上下文检查：短片段（< 350ms）的音高和前后 1.5 秒的旋律差超过 7 个半音时，
+/// 差一个八度左右就折回来（八度误判），差得更远就丢掉（多半是伴奏低音、呼吸声）。
+/// 片段在不发声处或相邻两帧跳超过 4 个半音处断开。
+fn context_fix(f0: &mut [f32], conf: &mut [f32]) {
+    let n = f0.len();
+    let mut segs = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if f0[i] <= 0.0 {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < n && f0[i] > 0.0 && (midi(f0[i]) - midi(f0[i - 1])).abs() <= 4.0 {
+            i += 1;
+        }
+        segs.push((start, i));
+    }
+    // 长片段可信，用它们当上下文；附近没有长片段时才退而用所有发声帧
+    let mut trusted = vec![false; n];
+    for &(s, e) in &segs {
+        if e - s >= SHORT_SEGMENT {
+            trusted[s..e].fill(true);
+        }
+    }
+    let orig = f0.to_vec();
+    for &(s, e) in &segs {
+        if e - s >= SHORT_SEGMENT {
+            continue;
+        }
+        let window = s.saturating_sub(CONTEXT)..(e + CONTEXT).min(n);
+        let mut ctx: Vec<f32> = window.clone().filter(|&j| trusted[j]).map(|j| midi(orig[j])).collect();
+        if ctx.len() < 20 {
+            ctx = window.filter(|&j| (j < s || j >= e) && orig[j] > 0.0).map(|j| midi(orig[j])).collect();
+        }
+        if ctx.len() < 20 {
+            continue;
+        }
+        let diff = median(orig[s..e].iter().map(|&f| midi(f)).collect()) - median(ctx);
+        if diff.abs() <= 7.0 {
+            continue;
+        }
+        let octaves = (diff / 12.0).round();
+        if octaves.abs() == 1.0 && (diff - octaves * 12.0).abs() <= 1.5 {
+            let k = 2f32.powf(-octaves);
+            for j in s..e {
+                f0[j] = orig[j] * k;
+            }
+        } else {
+            for j in s..e {
+                f0[j] = 0.0;
+                conf[j] = 0.0;
+            }
+        }
+    }
+}
+
+fn basic_cleanup(f0: &mut [f32], conf: &mut [f32]) {
     let n = f0.len();
     let orig = f0.to_vec();
     for i in 0..n {
@@ -218,6 +296,35 @@ mod tests {
             let expect = 200.0 + 100.0 * (i as f32 * 0.01 + 0.02);
             assert!(cents(f, expect).abs() < 25.0, "帧 {i}: {f} vs {expect}");
         }
+    }
+
+    #[test]
+    fn short_outliers_are_folded_or_dropped() {
+        let hz = |m: f32| 440.0 * 2f32.powf((m - 69.0) / 12.0);
+        // 3 秒的旋律在 64–66 之间；中间夹着漏进来的低音（37，150ms）、八度误判（高一个八度，100ms）
+        let mut f0: Vec<f32> = (0..300).map(|i| hz(64.0 + (i / 50 % 3) as f32)).collect();
+        for v in &mut f0[100..115] {
+            *v = hz(37.0);
+        }
+        for v in &mut f0[200..210] {
+            *v *= 2.0;
+        }
+        let melody_200 = f0[200] / 2.0;
+        let mut conf = vec![0.9; 300];
+        context_fix(&mut f0, &mut conf);
+        assert!(f0[100..115].iter().all(|&f| f == 0.0), "低音没去掉");
+        assert!((f0[205] - melody_200).abs() < 0.01, "八度误判没折回：{}", f0[205]);
+        assert!((f0[50] - hz(65.0)).abs() < 0.01, "正常的音被改了");
+    }
+
+    #[test]
+    fn long_low_phrase_is_kept() {
+        // 真唱低音（持续 1 秒、比前面低 10 个半音）不能被当成漏音删掉
+        let hz = |m: f32| 440.0 * 2f32.powf((m - 69.0) / 12.0);
+        let mut f0: Vec<f32> = (0..300).map(|i| if i < 200 { hz(64.0) } else { hz(54.0) }).collect();
+        let mut conf = vec![0.9; 300];
+        context_fix(&mut f0, &mut conf);
+        assert!(f0[200..].iter().all(|&f| (f - hz(54.0)).abs() < 0.01));
     }
 
     #[test]

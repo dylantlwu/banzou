@@ -275,7 +275,7 @@ fn cache_key(path: &Path, salt: &str) -> io::Result<String> {
 
 /// 音高分析（结果按文件缓存；原唱人声只算一次）
 pub fn analyze(path: &Path, cache_dir: &Path) -> io::Result<pitch::PitchTrack> {
-    let file = cache_dir.join("pitch").join(format!("{}.json", cache_key(path, "pitch-v1")?));
+    let file = cache_dir.join("pitch").join(format!("{}.json", cache_key(path, "pitch-v2")?));
     if let Some(track) = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
         return Ok(track);
     }

@@ -254,6 +254,12 @@ export function useNoteEditor({ enabled, initial, mine, start, hop, ref, refHop,
     (ctx: CanvasRenderingContext2D, xOf: (t: number) => number, yOf: (m: number) => number) => {
       if (!enabled || !mine) return;
       const unit = Math.abs(yOf(0) - yOf(1));
+      // 红绿色弱也分得清：普通 = 蓝，改过 = 文字色描边（和「修后」曲线一样），跑调 = 橙色虚线框
+      const style = getComputedStyle(ctx.canvas);
+      const css = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+      const editedColor = css("--pitch-tuned", "#1c1b19");
+      const offColor = css("--pitch-off", "#e69f00");
+      const accent = css("--accent", "#c2410c");
       for (const n of notesRef.current) {
         const x0 = xOf(n.start);
         const x1 = xOf(n.end);
@@ -265,16 +271,27 @@ export function useNoteEditor({ enabled, initial, mine, start, hop, ref, refHop,
         const off = !Number.isNaN(r) && Math.abs(r + 12 * Math.round((p - r) / 12) - p) * 100 > OFF_CENTS;
         const sel = selected.includes(n.id);
         const h = Math.max(6, unit * 0.8);
-        ctx.fillStyle = sel ? "rgba(194,65,12,0.35)" : n.edited ? "rgba(245,159,0,0.30)" : "rgba(59,130,246,0.22)";
-        ctx.strokeStyle = off ? "#e03131" : sel ? "#c2410c" : n.edited ? "#f59f00" : "rgba(59,130,246,0.7)";
-        ctx.lineWidth = sel ? 2 : 1;
+        ctx.fillStyle = sel ? "rgba(194,65,12,0.35)" : "rgba(59,130,246,0.22)";
+        ctx.strokeStyle = sel ? accent : n.edited ? editedColor : "rgba(59,130,246,0.7)";
+        ctx.lineWidth = sel || n.edited ? 2 : 1;
         const y = yOf(p) - h / 2;
+        const wBox = Math.max(2, x1 - x0);
         ctx.beginPath();
-        ctx.roundRect(x0, y, Math.max(2, x1 - x0), h, 3);
+        ctx.roundRect(x0, y, wBox, h, 3);
         ctx.fill();
         ctx.stroke();
+        if (off) {
+          ctx.save();
+          ctx.strokeStyle = offColor;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.roundRect(x0 - 3, y - 3, wBox + 6, h + 6, 5);
+          ctx.stroke();
+          ctx.restore();
+        }
         if (n.edited && x1 - x0 > 30) {
-          ctx.fillStyle = "#b35c00";
+          ctx.fillStyle = editedColor;
           ctx.font = "10px -apple-system, sans-serif";
           const label = n.offset ? `${n.offset > 0 ? "+" : ""}${n.offset}` : "✎";
           ctx.fillText(label, x0 + 3, y - 2);
