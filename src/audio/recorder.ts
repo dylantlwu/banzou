@@ -151,6 +151,13 @@ export class Recorder {
     return peak;
   }
 
+  /** 最近 2048 个麦克风采样（约 43ms），给演唱页的实时音高用；麦克风没开时返回 false */
+  timeDomain(out: Float32Array<ArrayBuffer>): boolean {
+    if (!this.analyser) return false;
+    this.analyser.getFloatTimeDomainData(out);
+    return true;
+  }
+
   /** 耳返：把麦克风直接送到耳机（只适合有线耳机，蓝牙延迟太大） */
   setMonitor(on: boolean, volume = 0.8): void {
     if (!this.source) return;

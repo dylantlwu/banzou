@@ -1,10 +1,19 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { type Take, takeSpan } from "../takes/takes";
 import type { TakesApi } from "../takes/useTakes";
 import { formatTime } from "../utils/time";
 import { Btn } from "./Btn";
 
+interface ExportFile {
+  path: string;
+  name: string;
+  modified: number;
+}
+
 interface Props {
+  /** 歌名：用来列出「录音/歌名/导出」里的成品 */
+  title: string;
   takes: TakesApi;
   /** 回放时在「我的声音」和「原唱」之间切换（V） */
   compare: boolean;
@@ -26,7 +35,7 @@ function shortDate(iso: string) {
 }
 
 /** 录音 Take 列表（PRD 4.4 录完之后） */
-export function TakesPanel({ takes, compare, onToggleCompare, canCompare, voiceVolume, onVoiceVolume, onSeek, disabled, onOpenTune, onComp }: Props) {
+export function TakesPanel({ title, takes, compare, onToggleCompare, canCompare, voiceVolume, onVoiceVolume, onSeek, disabled, onOpenTune, onComp }: Props) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -36,6 +45,18 @@ export function TakesPanel({ takes, compare, onToggleCompare, canCompare, voiceV
     const id = window.setTimeout(() => setConfirmDelete(null), 3000);
     return () => window.clearTimeout(id);
   }, [confirmDelete]);
+
+  // 导出的成品（修音页导出的 wav / m4a）；换歌、录音列表变了都重新读一次
+  const [exports, setExports] = useState<ExportFile[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<ExportFile[]>("list_exports", { title })
+      .then((list) => !cancelled && setExports(list))
+      .catch(() => !cancelled && setExports([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [title, takes.takes]);
 
   const sel = takes.selected;
   const commitRename = () => {
@@ -168,6 +189,29 @@ export function TakesPanel({ takes, compare, onToggleCompare, canCompare, voiceV
               去修音
             </Btn>
           )}
+        </div>
+      )}
+      {exports.length > 0 && (
+        <div className="export-list">
+          <div className="takes-head">
+            <span>导出的成品（{exports.length}）</span>
+            <Btn className="link" onClick={() => void invoke("reveal_file", { path: exports[0].path })} title="在访达里打开导出文件夹">
+              打开文件夹
+            </Btn>
+          </div>
+          <ul>
+            {exports.map((f) => (
+              <li key={f.path}>
+                <span className="export-name" title={f.path}>
+                  <span className="tag">{f.name.split(".").pop()?.toUpperCase()}</span> {f.name.replace(/\.[^.]+$/, "")}
+                </span>
+                <span className="muted small">{shortDate(new Date(f.modified * 1000).toISOString())}</span>
+                <Btn className="link" onClick={() => void invoke("open_file", { path: f.path })} title="用系统播放器打开">
+                  播放
+                </Btn>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {takes.error && <p className="error-text small">{takes.error}</p>}

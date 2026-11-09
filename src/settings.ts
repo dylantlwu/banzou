@@ -36,6 +36,8 @@ export interface Settings {
   liveVoiceGain: number;
   liveAccGain: number;
   liveMicId: string;
+  /** 演唱页显示音高窗口（原唱音高 + 我唱的） */
+  showPitch: boolean;
 }
 
 export type LivePosition = "bottom" | "center" | "top";
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   liveVoiceGain: 1,
   liveAccGain: 0.8,
   liveMicId: "",
+  showPitch: true,
 }
 
 type NumericKey =
@@ -104,6 +107,7 @@ export function normalizeSettings(raw: unknown): Settings {
   if (typeof obj.liveEnabled === "boolean") out.liveEnabled = obj.liveEnabled;
   if (typeof obj.liveShowNext === "boolean") out.liveShowNext = obj.liveShowNext;
   if (typeof obj.liveTune === "boolean") out.liveTune = obj.liveTune;
+  if (typeof obj.showPitch === "boolean") out.showPitch = obj.showPitch;
   for (const k of ["obsPassword", "streamServer", "streamKey", "liveMicId"] as const) {
     if (typeof obj[k] === "string") out[k] = (obj[k] as string).slice(0, 500);
   }

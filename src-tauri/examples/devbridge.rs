@@ -111,6 +111,7 @@ fn run(root: &Path, cmd: &str, args: &Value) -> Result<Value, String> {
         "export_finish" => studio::export_finish(root, &s("path").ok_or("缺少 path")?, args.get("m4a").and_then(Value::as_bool).unwrap_or(false)).map(|v| serde_json::to_value(v).unwrap()),
         "export_dry" => studio::export_dry(root, &s("title").ok_or("缺少 title")?, &s("takeId").ok_or("缺少 takeId")?, &s("name").ok_or("缺少 name")?).map(Value::from),
         "reveal_file" => Ok(Value::Null),
+        "list_exports" => studio::list_exports(root, &s("title").ok_or("缺少 title")?).and_then(|v| serde_json::to_value(v).map_err(|e| e.to_string())),
         "transpose_file" => studio::transpose_file(root, &s("path").ok_or("缺少 path")?, args.get("semitones").and_then(Value::as_f64).unwrap_or(0.0)).map(Value::from),
         "extract_audio" => studio::extract_audio(root, &s("video").ok_or("缺少 video")?, &s("title").ok_or("缺少 title")?).map(Value::from),
         "open_file" => Ok(Value::Null),

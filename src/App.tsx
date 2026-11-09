@@ -9,6 +9,9 @@ import { LivePanel } from "./components/LivePanel";
 import { PracticePage } from "./components/PracticePage";
 import { RecordBar } from "./components/RecordBar";
 import { TakesPanel } from "./components/TakesPanel";
+import { type LiveInput, SingPitch } from "./components/SingPitch";
+import type { RefPitch } from "./sing/pitchView";
+import { type PitchTrack, hzToMidi } from "./tune/autotune";
 import { TunePage } from "./components/TunePage";
 import { takeTracks } from "./takes/takes";
 import { useRecording } from "./takes/useRecording";
@@ -422,6 +425,41 @@ export default function App() {
   /** 耳朵当前听到的歌曲时间（只有播放中声音才在耳机路上，暂停时不扣延迟） */
   const heard = player.playing ? player.position - (settings.outputLatencyMs / 1000) * player.rate : player.position;
 
+  // ---------- 音高窗口（原唱音高 + 我唱的） ----------
+  const pitchVocal = settings.showPitch && mode === "sing" && hasVocal ? selected!.vocals[0].path : null;
+  const [refPitch, setRefPitch] = useState<{ path: string; ref: RefPitch | null; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!pitchVocal || refPitch?.path === pitchVocal) return;
+    let cancelled = false;
+    setRefPitch({ path: pitchVocal, ref: null, error: null });
+    invoke<PitchTrack>("analyze_pitch", { path: pitchVocal })
+      .then((tr) => {
+        if (!cancelled) setRefPitch({ path: pitchVocal, ref: { hop: tr.hop, midi: Float64Array.from(tr.f0, (f) => (f > 0 ? hzToMidi(f) : NaN)) }, error: null });
+      })
+      .catch((e) => !cancelled && setRefPitch({ path: pitchVocal, ref: null, error: `原唱音高分析失败：${String(e)}` }));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pitchVocal]);
+  const pitchStatus = !refPitch || refPitch.path !== pitchVocal ? "正在分析原唱音高…" : refPitch.error ?? (refPitch.ref ? null : "正在分析原唱音高…（第一次要几秒）");
+  const getHeard = useCallback(
+    () => (player.playing ? player.getPosition() - (settings.outputLatencyMs / 1000) * player.rate : player.getPosition()),
+    [player, settings.outputLatencyMs],
+  );
+  const liveInput = useMemo<LiveInput | null>(
+    () =>
+      rec.phase === "idle" || rec.phase === "opening"
+        ? null
+        : {
+            read: rec.readInput,
+            sampleRate: rec.inputSampleRate,
+            songTimeNow: () => player.positionAt(player.context().currentTime - 0.018) - rec.latencyMs / 1000,
+            playing: () => player.playing,
+          },
+    [rec.phase, rec.readInput, rec.inputSampleRate, rec.latencyMs, player],
+  );
+
   const jumpLine = useCallback(
     (dir: 1 | -1) => {
       if (!lyricsDoc) return;
@@ -738,6 +776,14 @@ export default function App() {
                 <Btn className="ghost" onClick={() => void toggleBig()} title="全屏大字（F）">
                   {big ? "退出全屏" : "全屏"}
                 </Btn>
+                <Btn
+                  className={settings.showPitch && hasVocal ? "ghost active" : "ghost"}
+                  onClick={() => updateSettings({ showPitch: !settings.showPitch })}
+                  disabled={!hasVocal}
+                  title={hasVocal ? "音高窗口：原唱音高跟着播放滚动，打开录音栏时显示自己唱的" : "需要「歌名 - 人声.wav」原唱人声文件"}
+                >
+                  音高
+                </Btn>
                 {lyricsDoc && hasTimedLines(lyricsDoc) && (
                   <div className="offset" title="歌词整体偏移，保存在歌词文件里">
                     <span className="muted small">歌词</span>
@@ -817,6 +863,7 @@ export default function App() {
               )}
               {source?.kind === "accompaniment" && (takesApi.takes.length > 0 || rec.phase !== "idle") && (
                 <TakesPanel
+                  title={selected.title}
                   takes={takesApi}
                   compare={vocalOn}
                   onToggleCompare={() => setVocalOn((v) => !v)}
@@ -836,6 +883,16 @@ export default function App() {
                 />
               )}
             </div>
+            {pitchVocal && (
+              <SingPitch
+                refPitch={refPitch?.path === pitchVocal ? refPitch.ref : null}
+                transpose={transpose}
+                status={pitchStatus}
+                getHeard={getHeard}
+                live={liveInput}
+                big={big}
+              />
+            )}
             {lyricsError && <p className="error-text small center">{lyricsError}</p>}
           </section>
         )}

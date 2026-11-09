@@ -581,6 +581,7 @@ export function TunePage({ song, take, dir, lyricsDoc, player, compare, onToggle
             </Btn>
             {!tunedPath && <span className="muted small">还没应用修音，会导出原始录音</span>}
           </div>
+          <p className="muted small">保存到素材文件夹的「录音 / {title} / 导出」。回到演唱页，录音列表下面的「导出的成品」里也能找到。</p>
           {exported.length > 0 && (
             <ul className="export-files">
               {exported.map((f) => (

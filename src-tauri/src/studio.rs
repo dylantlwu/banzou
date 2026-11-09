@@ -121,6 +121,37 @@ pub fn export_dry(root: &Path, title: &str, take_id: &str, name: &str) -> Result
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// 导出文件夹里的成品
+#[derive(serde::Serialize, Debug)]
+pub struct ExportFile {
+    pub path: String,
+    pub name: String,
+    /// 修改时间（Unix 秒），新的在前
+    pub modified: f64,
+}
+
+/// 列出这首歌导出过的成品（`录音/<歌名>/导出/` 里的 wav / m4a，不含正在写的 .part）
+pub fn list_exports(root: &Path, title: &str) -> Result<Vec<ExportFile>, String> {
+    let dir = song_dir(root, title).join(recording::EXPORT_DIR);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<ExportFile> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let lower = name.to_lowercase();
+            if name.starts_with('.') || !(lower.ends_with(".wav") || lower.ends_with(".m4a")) || !e.path().is_file() {
+                return None;
+            }
+            let modified = e.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
+            Some(ExportFile { path: e.path().to_string_lossy().into_owned(), name, modified })
+        })
+        .collect();
+    out.sort_by(|a, b| b.modified.total_cmp(&a.modified).then_with(|| a.name.cmp(&b.name)));
+    Ok(out)
+}
+
 /// 在访达里显示
 pub fn reveal(root: &Path, path: &str) -> Result<(), String> {
     let p = inside_root(root, Path::new(path))?;
@@ -193,4 +224,23 @@ pub fn open_file(root: &Path, path: &str) -> Result<(), String> {
     let p = inside_root(root, Path::new(path))?;
     std::process::Command::new("/usr/bin/open").arg(p).status().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_finished_exports_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = song_dir(tmp.path(), "月光").join(recording::EXPORT_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        for f in ["月光 - 第 1 遍.wav", "月光 - 第 1 遍.m4a", "月光 - 第 2 遍.wav.part", ".DS_Store", "说明.txt"] {
+            fs::write(dir.join(f), b"x").unwrap();
+        }
+        let names: Vec<String> = list_exports(tmp.path(), "月光").unwrap().into_iter().map(|f| f.name).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names.contains(&"月光 - 第 1 遍.m4a".to_string()));
+        assert!(list_exports(tmp.path(), "没录过").unwrap().is_empty());
+    }
 }

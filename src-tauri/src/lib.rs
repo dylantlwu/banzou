@@ -302,6 +302,11 @@ fn export_dry(title: String, take_id: String, name: String) -> Result<String, St
 }
 
 #[tauri::command]
+fn list_exports(title: String) -> Result<Vec<studio::ExportFile>, String> {
+    studio::list_exports(&default_library_dir()?, &title)
+}
+
+#[tauri::command]
 fn reveal_file(path: String) -> Result<(), String> {
     studio::reveal(&default_library_dir()?, &path)
 }
@@ -390,6 +395,7 @@ pub fn run() {
             export_finish,
             export_dry,
             reveal_file,
+            list_exports,
             transpose_file,
             extract_audio,
             open_file,

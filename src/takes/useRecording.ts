@@ -432,6 +432,9 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
     stop,
     calibrate,
     dismissNotice: () => setNotice(null),
+    /** 读最近的麦克风采样（演唱页音高窗口用）；麦克风没开时返回 false */
+    readInput: useCallback((out: Float32Array<ArrayBuffer>) => recorderRef.current?.timeDomain(out) ?? false, []),
+    inputSampleRate: useCallback(() => recorderRef.current?.sampleRate ?? 48000, []),
   };
 }
 
