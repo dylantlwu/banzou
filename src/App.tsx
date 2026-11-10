@@ -19,6 +19,7 @@ import { useTakes } from "./takes/useTakes";
 import { UpdateCard } from "./components/UpdateCard";
 import { type UpdateInfo, checkForUpdate, shouldAutoCheck } from "./update/updater";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { type SepTarget, VideoDialog } from "./components/VideoDialog";
 import { useLiveSync } from "./live/liveSync";
 import { useGoLive } from "./live/useGoLive";
 import { TapEditor } from "./components/TapEditor";
@@ -139,6 +140,32 @@ export default function App() {
       setScanning(false);
     }
   }, []);
+  // 下载视频（PRD 4.10）：窗口关掉时下载在后台继续，按钮上显示进度
+  const [videoOpen, setVideoOpen] = useState(false);
+  const [videoBusy, setVideoBusy] = useState<string | null>(null);
+  const onVideoDownloaded = useCallback(async (path: string) => {
+    const lib = await invoke<Library>("scan_library");
+    setLibrary(lib);
+    return lib.songs.find((s) => s.originals.some((o) => o.path === path))?.title ?? null;
+  }, []);
+  // 做成伴奏（PRD 4.11）：从曲库里点进来时带上文件
+  const [videoTarget, setVideoTarget] = useState<(SepTarget & { key: number }) | null>(null);
+  const openSeparate = useCallback((file: { path: string; fileName: string }, song: string | null) => {
+    setVideoTarget({ ...file, song, key: Date.now() });
+    setVideoOpen(true);
+  }, []);
+  const onSeparated = useCallback(async () => {
+    setLibrary(await invoke<Library>("scan_library"));
+  }, []);
+  const openSongByName = useCallback(
+    (name: string) => {
+      const key = name.trim().toLowerCase().replace(/\s+/g, " ");
+      const song = library?.songs.find((s) => s.title.trim().toLowerCase().replace(/\s+/g, " ") === key);
+      if (song) setSelectedId(song.id);
+      setVideoOpen(false);
+    },
+    [library],
+  );
   // 第一次打开：还没选素材文件夹
   const [needLibrary, setNeedLibrary] = useState(false);
   const chooseLibrary = useCallback(async () => {
@@ -619,6 +646,9 @@ export default function App() {
             <Btn className="ghost" onClick={() => setSettingsOpen(true)} title="设置">
               设置
             </Btn>
+            <Btn className={videoBusy ? "ghost active" : "ghost"} onClick={() => setVideoOpen(true)} title="粘贴 YouTube 链接，下载视频到素材文件夹" disabled={!library}>
+              {videoBusy ?? "下载视频"}
+            </Btn>
           </div>
         </header>
 
@@ -680,7 +710,12 @@ export default function App() {
             <ul>
               {library.unassigned.map((f) => (
                 <li key={f.path} className="muted" title={f.path}>
-                  {f.fileName}
+                  <span className="unassigned-name">{f.fileName}</span>
+                  {/\.(mp4|mov|m4v|mkv)$/i.test(f.fileName) && (
+                    <Btn className="link unassigned-action" onClick={() => openSeparate(f, null)} title="用 Demucs 分离出伴奏和人声，配成一首歌">
+                      做成伴奏
+                    </Btn>
+                  )}
                 </li>
               ))}
             </ul>
@@ -756,6 +791,11 @@ export default function App() {
                     <Btn className="link" onClick={() => void invoke("reveal_file", { path: selected.originals[0].path })}>
                       在访达中显示
                     </Btn>
+                    {(selected.vocals.length === 0 || selected.accompaniments.length === 0) && (
+                      <Btn className="link" onClick={() => openSeparate(selected.originals[0], selected.title)} title="用 Demucs 从视频里分离出缺的伴奏 / 人声">
+                        做成伴奏
+                      </Btn>
+                    )}
                     {!selected.externalRecordings.some((f) => /原曲/.test(f.fileName)) && (
                       <Btn
                         className="link"
@@ -1097,6 +1137,7 @@ export default function App() {
           }}
         />
       )}
+      <VideoDialog open={videoOpen} onClose={() => setVideoOpen(false)} libraryRoot={library?.root ?? null} onDownloaded={onVideoDownloaded} onBusy={setVideoBusy} target={videoTarget} onSeparated={onSeparated} onOpenSong={openSongByName} />
       {update && <UpdateCard key={update.version} update={update} onClose={() => setUpdate(null)} />}
     </div>
   );

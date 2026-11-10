@@ -4,9 +4,11 @@ pub mod live;
 pub mod lyrics_store;
 pub mod obs;
 pub mod recording;
+pub mod separate;
 pub mod settings;
 pub mod studio;
 pub mod transcribe;
+pub mod video;
 
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -328,6 +330,83 @@ fn open_file(path: String) -> Result<(), String> {
     studio::open_file(&default_library_dir()?, &path)
 }
 
+// ---------- 下载视频（PRD 4.10） ----------
+
+fn video_dirs(app: &tauri::AppHandle) -> Result<video::Dirs, String> {
+    Ok(video::Dirs {
+        tools: app.path().app_data_dir().map_err(|e| e.to_string())?.join("tools"),
+        work: cache_dir(app)?.join("video"),
+    })
+}
+
+#[tauri::command]
+async fn video_tools(app: tauri::AppHandle) -> Result<video::ToolStatus, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || video::tool_status(&dirs)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn video_install_tools(app: tauri::AppHandle) -> Result<video::ToolStatus, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || video::install_tools(&dirs)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn video_update_ytdlp(app: tauri::AppHandle) -> Result<String, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || video::update_ytdlp(&dirs)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn video_probe(app: tauri::AppHandle, url: String) -> Result<video::VideoInfo, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || video::probe(&dirs, &url)).await.map_err(|e| e.to_string())?
+}
+
+/// 下载到素材文件夹
+#[tauri::command]
+async fn video_download(app: tauri::AppHandle, url: String, quality: String) -> Result<video::Downloaded, String> {
+    let dirs = video_dirs(&app)?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || video::download(&dirs, &url, &quality, &root)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn video_job(app: tauri::AppHandle) -> Result<Option<video::Job>, String> {
+    Ok(video::job_status(&video_dirs(&app)?))
+}
+
+#[tauri::command]
+fn video_cancel(app: tauri::AppHandle) -> Result<(), String> {
+    video::cancel(&video_dirs(&app)?);
+    Ok(())
+}
+
+/// 繁体转简体（做成伴奏时默认歌名用简体，和素材文件夹的习惯一致）
+#[tauri::command]
+fn to_simplified(text: String) -> String {
+    fast2s::convert(&text)
+}
+
+#[tauri::command]
+fn sep_status(app: tauri::AppHandle) -> Result<separate::SepStatus, String> {
+    Ok(separate::status(&video_dirs(&app)?))
+}
+
+#[tauri::command]
+async fn sep_install(app: tauri::AppHandle) -> Result<separate::SepStatus, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || separate::install(&dirs)).await.map_err(|e| e.to_string())?
+}
+
+/// 做成伴奏：素材文件夹里的视频 / 音频 →「歌名 - 伴奏.wav」「歌名 - 人声.wav」
+#[tauri::command]
+async fn sep_run(app: tauri::AppHandle, path: String, name: String) -> Result<separate::Separated, String> {
+    let dirs = video_dirs(&app)?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || separate::run(&dirs, &root, &path, &name)).await.map_err(|e| e.to_string())?
+}
+
 // ---------- 一键开播（OBS） ----------
 
 #[tauri::command]
@@ -401,7 +480,18 @@ pub fn run() {
             open_file,
             obs_go_live,
             obs_stop,
-            obs_status
+            obs_status,
+            video_tools,
+            video_install_tools,
+            video_update_ytdlp,
+            video_probe,
+            video_download,
+            video_job,
+            video_cancel,
+            to_simplified,
+            sep_status,
+            sep_install,
+            sep_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

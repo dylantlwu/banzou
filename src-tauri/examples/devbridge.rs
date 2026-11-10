@@ -3,12 +3,16 @@
 //! 用法：devbridge <测试曲库目录> <命令>，参数 JSON 从标准输入读，结果 JSON 写到标准输出：
 //! {"ok": ...} 或 {"err": "..."}。只操作测试曲库目录（app/.testlib），不碰真正的素材文件夹。
 
-use banzou_lib::{library, lyrics_store, obs, recording, settings, studio, transcribe};
+use banzou_lib::{library, lyrics_store, obs, recording, separate, settings, studio, transcribe, video};
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const DEV_LIVE_PORT: u16 = 17890;
+
+fn video_dirs(root: &Path) -> video::Dirs {
+    video::Dirs { tools: root.join(".tools"), work: root.join(".cache/video") }
+}
 
 fn run(root: &Path, cmd: &str, args: &Value) -> Result<Value, String> {
     let s = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
@@ -115,6 +119,21 @@ fn run(root: &Path, cmd: &str, args: &Value) -> Result<Value, String> {
         "transpose_file" => studio::transpose_file(root, &s("path").ok_or("缺少 path")?, args.get("semitones").and_then(Value::as_f64).unwrap_or(0.0)).map(Value::from),
         "extract_audio" => studio::extract_audio(root, &s("video").ok_or("缺少 video")?, &s("title").ok_or("缺少 title")?).map(Value::from),
         "open_file" => Ok(Value::Null),
+        // 下载视频：工具装在测试曲库的 .tools（和正式应用分开，测得到第一次安装），视频下载到测试曲库
+        "video_tools" => Ok(serde_json::to_value(video::tool_status(&video_dirs(root))).unwrap()),
+        "video_install_tools" => video::install_tools(&video_dirs(root)).map(|v| serde_json::to_value(v).unwrap()),
+        "video_update_ytdlp" => video::update_ytdlp(&video_dirs(root)).map(Value::from),
+        "video_probe" => video::probe(&video_dirs(root), &s("url").ok_or("缺少 url")?).map(|v| serde_json::to_value(v).unwrap()),
+        "video_download" => video::download(&video_dirs(root), &s("url").ok_or("缺少 url")?, &s("quality").unwrap_or_default(), root).map(|v| serde_json::to_value(v).unwrap()),
+        "video_job" => Ok(serde_json::to_value(video::job_status(&video_dirs(root))).unwrap()),
+        "to_simplified" => Ok(Value::from(fast2s::convert(&s("text").unwrap_or_default()))),
+        "sep_status" => Ok(serde_json::to_value(separate::status(&video_dirs(root))).unwrap()),
+        "sep_install" => separate::install(&video_dirs(root)).map(|v| serde_json::to_value(v).unwrap()),
+        "sep_run" => separate::run(&video_dirs(root), root, &s("path").ok_or("缺少 path")?, &s("name").ok_or("缺少 name")?).map(|v| serde_json::to_value(v).unwrap()),
+        "video_cancel" => {
+            video::cancel(&video_dirs(root));
+            Ok(Value::Null)
+        }
         // 测试模式也能控制本机真的 OBS（用来验证一键开播）
         "obs_go_live" => obs::go_live(
             &s("password").ok_or("缺少 password")?,

@@ -174,18 +174,44 @@ pub fn extract_artist(s: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// 按模糊歌名找最匹配的歌曲：一方包含另一方即算匹配，取歌名最长的，
-/// 避免「月光 Lo-fi」的视频误配到「月光」
+/// 逐词匹配用的键：繁体转简体、小写，括号和标点都当空格（括号里的内容保留，
+/// YouTube 标题常把歌名放在【】里）
+fn word_key(s: &str) -> String {
+    let s: String = fast2s::convert(s)
+        .chars()
+        .map(|c| if "[]【】（）()《》〈〉「」『』.。·・_-—–－,，!！&|/:：".contains(c) { ' ' } else { c })
+        .collect();
+    normalize_title(&s)
+}
+
+/// 歌名里的每个词都出现在文件名里：中文词按子串找，英文词要整词出现
+/// （「寂寞先生 曹格」配「曹格 Gary Chaw【寂寞先生】Official Music Video」）
+fn all_words_in(song_key: &str, file_key: &str) -> bool {
+    let file_words: Vec<&str> = file_key.split(' ').collect();
+    let words: Vec<&str> = song_key.split(' ').filter(|w| !w.is_empty()).collect();
+    !words.is_empty()
+        && words.iter().all(|w| {
+            if w.is_ascii() { file_words.contains(w) } else { file_key.contains(w) }
+        })
+}
+
+/// 按模糊歌名找最匹配的歌曲：一方包含另一方，或歌名每个词都在文件名里，都算匹配；
+/// 取歌名最长的，避免「月光 Lo-fi」的视频误配到「月光」
 fn best_song_match(songs: &BTreeMap<String, Song>, stem: &str) -> Option<String> {
     let key = fuzzy_key(stem);
-    if key.chars().count() < 2 {
+    let words = word_key(stem);
+    if key.chars().count() < 2 && words.chars().count() < 2 {
         return None;
     }
     songs
         .values()
-        .map(|s| (s.id.clone(), fuzzy_key(&s.title)))
-        .filter(|(_, skey)| !skey.is_empty() && (key.contains(skey.as_str()) || skey.contains(key.as_str())))
-        .max_by_key(|(_, skey)| skey.chars().count())
+        .filter_map(|s| {
+            let skey = fuzzy_key(&s.title);
+            let contains = !skey.is_empty() && key.chars().count() >= 2 && (key.contains(skey.as_str()) || skey.contains(key.as_str()));
+            let swords = word_key(&s.title);
+            (contains || all_words_in(&swords, &words)).then(|| (s.id.clone(), swords.chars().count()))
+        })
+        .max_by_key(|(_, len)| *len)
         .map(|(id, _)| id)
 }
 
@@ -420,5 +446,39 @@ mod tests {
         let lib = build_library(Path::new("/x"), &files);
         assert_eq!(song(&lib, "月光 Lo-fi").originals.len(), 1);
         assert_eq!(song(&lib, "月光").originals.len(), 0);
+    }
+
+    #[test]
+    fn youtube_titles_match_song_words() {
+        let files: Vec<String> = [
+            "寂寞先生 曹格 - 伴奏.wav",
+            "几分之几 卢广仲 - 伴奏.wav",
+            "刻在我心底的名字 卢广仲 - 伴奏.wav",
+            "太阳与地球 卢广仲 - 伴奏.wav",
+            "Lose Control Teddy Swims - 伴奏.wav",
+            "The Door Teddy Swims - 伴奏.wav",
+            "曹格 Gary Chaw【寂寞先生】Official Music Video.mp4",
+            "盧廣仲 Crowd Lu 【刻在我心底的名字 Your Name Engraved Herein】 Official Music Video  （刻在你心底的名字電影主題曲）.mp4",
+            "盧廣仲 Crowd Lu 【幾分之幾 You Complete Me】 Official Music Video （花甲大人轉男孩電影主題曲）.mp4",
+            "盧廣仲 Crowd Lu【太陽與地球 Sun & Earth】Official Video.mp4",
+            "Teddy Swims - Lose Control (Lyric Video).mp4",
+            "Teddy Swims - The Door (Official Music Video).mp4",
+            "Other Swims - Another Door.mp4",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let lib = build_library(Path::new("/lib"), &files);
+        let originals = |title: &str| -> Vec<String> {
+            lib.songs.iter().find(|s| s.title == title).unwrap().originals.iter().map(|o| o.file_name.clone()).collect()
+        };
+        assert_eq!(originals("寂寞先生 曹格"), ["曹格 Gary Chaw【寂寞先生】Official Music Video.mp4"]);
+        assert!(originals("几分之几 卢广仲")[0].contains("幾分之幾"));
+        assert!(originals("刻在我心底的名字 卢广仲")[0].contains("刻在我心底的名字"));
+        assert!(originals("太阳与地球 卢广仲")[0].contains("太陽與地球"));
+        assert_eq!(originals("Lose Control Teddy Swims"), ["Teddy Swims - Lose Control (Lyric Video).mp4"]);
+        assert_eq!(originals("The Door Teddy Swims"), ["Teddy Swims - The Door (Official Music Video).mp4"]);
+        // 英文词要整词出现：Another 里有 the，也不算
+        assert_eq!(lib.unassigned.iter().map(|f| f.file_name.as_str()).collect::<Vec<_>>(), ["Other Swims - Another Door.mp4"]);
     }
 }
