@@ -56,6 +56,8 @@ export interface Player {
   setGroupChain: (group: string, factory: ((ctx: BaseAudioContext) => { input: AudioNode; output: AudioNode }) | null) => void;
   /** 某个文件重新生成了：丢掉缓存，下次加载重新读 */
   evict: (path: string) => void;
+  /** 出声设备变了：确认声音还在走，必要时重建 AudioContext 接着放 */
+  ensureOutput: (canRebuild: boolean) => Promise<"ok" | "resumed" | "rebuilt" | "stalled">;
 }
 
 /**
@@ -221,5 +223,6 @@ export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首�
     setLoop,
     setGroupChain: useCallback((g, f) => engine().setGroupChain(g, f), [engine]),
     evict: useCallback((path: string) => engine().evict(convertFileSrc(path)), [engine]),
+    ensureOutput: useCallback((canRebuild: boolean) => engine().ensureOutput(canRebuild), [engine]),
   };
 }

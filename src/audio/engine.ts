@@ -1,4 +1,5 @@
 import { Transport } from "./transport";
+import { clockStalled } from "./outputDevice";
 
 /** 音轨在歌曲时间线上的位置（录音 Take 用）；不给就是从歌曲 0 秒开始、整段播放 */
 export interface TrackRegion {
@@ -49,14 +50,14 @@ export interface TimelineEvent {
 }
 
 export class AudioEngine {
-  private readonly ctx = new AudioContext();
+  private ctx = new AudioContext();
   private readonly tracks = new Map<string, LoadedTrack>();
   readonly transport = new Transport(() => this.ctx.currentTime);
   private loadToken = 0;
   /** 解码缓存：切换 Take 时伴奏不用重新解码；只保留最近两次加载用到的 */
   private readonly cache = new Map<string, AudioBuffer>();
   private recentUrls: string[][] = [];
-  private readonly master: GainNode;
+  private master: GainNode;
   /** 分组效果链（修音页给人声加效果）：组名 → 搭链函数 */
   private readonly chainFactories = new Map<string, (ctx: BaseAudioContext) => { input: AudioNode; output: AudioNode }>();
   private readonly chains = new Map<string, { input: AudioNode; output: AudioNode }>();
@@ -289,6 +290,54 @@ export class AudioEngine {
     for (const track of this.tracks.values()) track.gain.disconnect();
     this.tracks.clear();
     this.transport.reset(0);
+  }
+
+  /**
+   * 出声设备变了之后调用：确认声音还在走。
+   * WKWebView 的 AudioContext 一般会自己跟到新的系统默认输出（实测时钟不断），这里是兜底：
+   * 没在走就先 resume；还不走（或者已经被关掉）且 `canRebuild` 时重建 AudioContext，从原位置接着放。
+   */
+  async ensureOutput(canRebuild: boolean, waitMs = 500): Promise<"ok" | "resumed" | "rebuilt" | "stalled"> {
+    if (this.ctx.state === "closed") return canRebuild ? (await this.rebuild(), "rebuilt") : "stalled";
+    if (!this.transport.playing) return "ok";
+    let resumed = false;
+    if (this.ctx.state !== "running") {
+      await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, waitMs))]);
+      resumed = true;
+    }
+    const t0 = this.ctx.currentTime;
+    const p0 = performance.now();
+    await new Promise((r) => setTimeout(r, waitMs));
+    if (!this.transport.playing) return resumed ? "resumed" : "ok";
+    if (!clockStalled(t0, this.ctx.currentTime, performance.now() - p0)) return resumed ? "resumed" : "ok";
+    if (!canRebuild) return "stalled";
+    await this.rebuild();
+    return "rebuilt";
+  }
+
+  /** 换一个新的 AudioContext：音轨、音量、效果链照旧，正在放就从原位置接着放 */
+  async rebuild(): Promise<void> {
+    const wasPlaying = this.transport.playing;
+    if (wasPlaying) this.pause();
+    const old = this.ctx;
+    this.ctx = new AudioContext();
+    this.master = this.ctx.createGain();
+    this.master.connect(this.ctx.destination);
+    this.chains.clear();
+    for (const [group, factory] of this.chainFactories) {
+      const chain = factory(this.ctx);
+      chain.output.connect(this.master);
+      this.chains.set(group, chain);
+    }
+    for (const track of this.tracks.values()) {
+      const gain = this.ctx.createGain();
+      gain.gain.value = track.gain.gain.value;
+      track.gain.disconnect();
+      track.gain = gain;
+      gain.connect(this.destinationFor(track.group));
+    }
+    if (old.state !== "closed") void old.close().catch(() => {});
+    if (wasPlaying) await this.play();
   }
 
   dispose(): void {

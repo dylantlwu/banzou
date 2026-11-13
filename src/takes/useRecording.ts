@@ -70,7 +70,11 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
   const [monitor, setMonitorState] = useState(false);
 
   const recorderRef = useRef<Recorder | null>(null);
-  const recorder = useCallback(() => (recorderRef.current ??= new Recorder(player.context())), [player]);
+  const recorder = useCallback(() => {
+    // 出声设备变了时播放器可能换过 AudioContext（只在没录音时换），旧的录音器跟着换掉
+    if (recorderRef.current && recorderRef.current.ctx !== player.context() && !recorderRef.current.isOpen) recorderRef.current = null;
+    return (recorderRef.current ??= new Recorder(player.context()));
+  }, [player]);
   const cancelRef = useRef(false);
   const stopRef = useRef<(() => void) | null>(null);
 

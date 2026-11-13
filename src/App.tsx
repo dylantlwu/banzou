@@ -15,6 +15,7 @@ import { type PitchTrack, hzToMidi } from "./tune/autotune";
 import { TunePage } from "./components/TunePage";
 import { takeTracks } from "./takes/takes";
 import { useRecording } from "./takes/useRecording";
+import { useFollowOutput } from "./audio/useFollowOutput";
 import { useTakes } from "./takes/useTakes";
 import { UpdateCard } from "./components/UpdateCard";
 import { type UpdateInfo, checkForUpdate, shouldAutoCheck } from "./update/updater";
@@ -44,6 +45,7 @@ import { CornerToggles, type SongMode, SongHeader } from "./layout/SongHeader";
 import { TransportBar } from "./layout/TransportBar";
 import { TunePicker } from "./layout/TunePicker";
 import { useAutoRescan } from "./layout/useAutoRescan";
+import { Splitter } from "./layout/split";
 import "./App.css";
 import "./layout/layout.css";
 
@@ -504,6 +506,12 @@ export default function App() {
   // 一键开播：直播修音 + OBS
   const goLive = useGoLive({ player, song: selected, settings, updateSettings, transpose });
 
+  // 用户在系统设置 / 控制中心里切了出声设备：确认声音跟过去了；录音、直播时不重建 AudioContext（它们用着同一个）
+  const canRebuildAudio = useRef(true);
+  canRebuildAudio.current = rec.phase === "idle" && goLive.phase !== "live";
+  const ensureOutput = player.ensureOutput;
+  useFollowOutput(() => void ensureOutput(canRebuildAudio.current));
+
   /** 耳朵当前听到的歌曲时间（只有播放中声音才在耳机路上，暂停时不扣延迟） */
   const heard = player.playing ? player.position - (settings.outputLatencyMs / 1000) * player.rate : player.position;
 
@@ -773,6 +781,7 @@ export default function App() {
         onManageTags={() => setTagsOpen(true)}
         tagBusy={tagBusy}
       />
+      {libOpen && mode !== "practice" && <Splitter id="lib-w" axis="x" target="prev" min={180} max={0.45} />}
 
       <main className="stage">
         {mode === "practice" ? (
@@ -946,6 +955,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  {mode === "record" && source?.kind === "accompaniment" && <Splitter id="takes-w" axis="x" target="next" min={200} max={0.6} />}
                   {mode === "record" && source?.kind === "accompaniment" && (
                     <TakesPanel
                       title={selected.title}
@@ -968,6 +978,7 @@ export default function App() {
                     />
                   )}
                 </div>
+                {pitchVocal && <Splitter id="pitch-h" axis="y" target="next" min={70} max={0.5} />}
                 {pitchVocal && (
                   <SingPitch
                     refPitch={refPitch?.path === pitchVocal ? refPitch.ref : null}

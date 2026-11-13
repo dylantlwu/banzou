@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Peaks } from "../audio/peaks";
+import { useRedrawOnResize } from "../layout/useRedrawOnResize";
 import type { LrcLine } from "../lyrics/lrc";
 
 interface Props {
@@ -29,6 +30,7 @@ export function Waveform({
   onSeek,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sizeTick = useRedrawOnResize(canvasRef);
   const dragRef = useRef<{ index: number; start: number } | null>(null);
   const viewStartRef = useRef(0);
 
@@ -83,7 +85,7 @@ export function Waveform({
     ctx.globalAlpha = 0.5;
     ctx.fillRect(xOf(time) - 0.5, 0, 1, h);
     ctx.globalAlpha = 1;
-  }, [peaks, time, lines, selected, viewStart, windowSeconds]);
+  }, [peaks, time, lines, selected, viewStart, windowSeconds, sizeTick]);
 
   const timeAt = (clientX: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();

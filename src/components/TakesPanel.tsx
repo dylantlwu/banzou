@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { type Take, takeSpan } from "../takes/takes";
 import type { TakesApi } from "../takes/useTakes";
 import { formatTime } from "../utils/time";
+import { Splitter } from "../layout/split";
 import { Btn } from "./Btn";
 
 interface ExportFile {
@@ -155,64 +156,71 @@ export function TakesPanel({ title, takes, compare, onToggleCompare, canCompare,
         })}
       </ul>
 
-      {sel && (
-        <div className="take-detail">
-          <div className="take-detail-row">
-            <Btn className={compare ? "toggle on" : "toggle"} onClick={onToggleCompare} disabled={!canCompare} title="切换听我的声音 / 原唱（V）">
-              {compare ? "正在听原唱" : "正在听我的声音"}
-            </Btn>
+      {(sel || exports.length > 0) && (
+        <>
+          <Splitter id="takes-bottom-h" axis="y" target="next" min={80} max={0.8} />
+          <div className="takes-bottom">
+            {sel && (
+              <div className="take-detail">
+                <div className="take-detail-row">
+                  <Btn className={compare ? "toggle on" : "toggle"} onClick={onToggleCompare} disabled={!canCompare} title="切换听我的声音 / 原唱（V）">
+                    {compare ? "正在听原唱" : "正在听我的声音"}
+                  </Btn>
+                </div>
+                <label className="take-detail-row">
+                  <span className="muted small">我的声音</span>
+                  <input type="range" min={0} max={1} step={0.01} value={voiceVolume} onChange={(e) => onVoiceVolume(Number(e.target.value))} />
+                </label>
+                <label className="take-detail-row">
+                  <span className="muted small">对齐微调</span>
+                  <input
+                    type="range"
+                    min={-150}
+                    max={150}
+                    step={5}
+                    value={sel.adjustMs}
+                    onChange={(e) => takes.update(sel.id, { adjustMs: Number(e.target.value) })}
+                    title="录音整体提前 / 推后，边播边拖听哪里最齐"
+                  />
+                  <span className="small adjust-value">{sel.adjustMs > 0 ? "+" : ""}{sel.adjustMs}ms</span>
+                </label>
+                <p className="muted small">
+                  {sel.clips.some((c) => c.autoAlignMs) &&
+                    `自动对齐 ${[...new Set(sel.clips.map((c) => c.autoAlignMs))].map((ms) => `${ms > 0 ? "+" : ""}${ms}ms`).join(" / ")} · `}
+                  延迟 {sel.latencyMs}ms{sel.deviceLabel ? ` · ${sel.deviceLabel}` : ""}
+                </p>
+                {onOpenTune && (
+                  <Btn className="primary" onClick={() => onOpenTune(sel)}>
+                    去修音
+                  </Btn>
+                )}
+              </div>
+            )}
+            {exports.length > 0 && (
+              <div className="export-list">
+                <div className="takes-head">
+                  <span>导出的成品（{exports.length}）</span>
+                  <Btn className="link" onClick={() => void invoke("reveal_file", { path: exports[0].path })} title="在访达里打开导出文件夹">
+                    打开文件夹
+                  </Btn>
+                </div>
+                <ul>
+                  {exports.map((f) => (
+                    <li key={f.path}>
+                      <span className="export-name" title={f.path}>
+                        <span className="tag">{f.name.split(".").pop()?.toUpperCase()}</span> {f.name.replace(/\.[^.]+$/, "")}
+                      </span>
+                      <span className="muted small">{shortDate(new Date(f.modified * 1000).toISOString())}</span>
+                      <Btn className="link" onClick={() => void invoke("open_file", { path: f.path })} title="用系统播放器打开">
+                        播放
+                      </Btn>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
-          <label className="take-detail-row">
-            <span className="muted small">我的声音</span>
-            <input type="range" min={0} max={1} step={0.01} value={voiceVolume} onChange={(e) => onVoiceVolume(Number(e.target.value))} />
-          </label>
-          <label className="take-detail-row">
-            <span className="muted small">对齐微调</span>
-            <input
-              type="range"
-              min={-150}
-              max={150}
-              step={5}
-              value={sel.adjustMs}
-              onChange={(e) => takes.update(sel.id, { adjustMs: Number(e.target.value) })}
-              title="录音整体提前 / 推后，边播边拖听哪里最齐"
-            />
-            <span className="small adjust-value">{sel.adjustMs > 0 ? "+" : ""}{sel.adjustMs}ms</span>
-          </label>
-          <p className="muted small">
-            {sel.clips.some((c) => c.autoAlignMs) &&
-              `自动对齐 ${[...new Set(sel.clips.map((c) => c.autoAlignMs))].map((ms) => `${ms > 0 ? "+" : ""}${ms}ms`).join(" / ")} · `}
-            延迟 {sel.latencyMs}ms{sel.deviceLabel ? ` · ${sel.deviceLabel}` : ""}
-          </p>
-          {onOpenTune && (
-            <Btn className="primary" onClick={() => onOpenTune(sel)}>
-              去修音
-            </Btn>
-          )}
-        </div>
-      )}
-      {exports.length > 0 && (
-        <div className="export-list">
-          <div className="takes-head">
-            <span>导出的成品（{exports.length}）</span>
-            <Btn className="link" onClick={() => void invoke("reveal_file", { path: exports[0].path })} title="在访达里打开导出文件夹">
-              打开文件夹
-            </Btn>
-          </div>
-          <ul>
-            {exports.map((f) => (
-              <li key={f.path}>
-                <span className="export-name" title={f.path}>
-                  <span className="tag">{f.name.split(".").pop()?.toUpperCase()}</span> {f.name.replace(/\.[^.]+$/, "")}
-                </span>
-                <span className="muted small">{shortDate(new Date(f.modified * 1000).toISOString())}</span>
-                <Btn className="link" onClick={() => void invoke("open_file", { path: f.path })} title="用系统播放器打开">
-                  播放
-                </Btn>
-              </li>
-            ))}
-          </ul>
-        </div>
+        </>
       )}
       {takes.error && <p className="error-text small">{takes.error}</p>}
     </aside>

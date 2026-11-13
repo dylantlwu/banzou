@@ -3,6 +3,7 @@ import { DEFAULT_RANGE, EXERCISES, type ExerciseId, ROUTINE, type Range, foldToT
 import { type PracticeLog, dayKey, emptyLog, loadLog, recentDays, record, saveLog, streak, trend } from "../practice/practiceLog";
 import { type PracticeApi, type Target, usePractice } from "../practice/usePractice";
 import type { Settings } from "../settings";
+import { Splitter } from "../layout/split";
 import { Btn } from "./Btn";
 
 interface Props {
@@ -210,6 +211,7 @@ export function PracticePage({ settings, onExit }: Props) {
             ))}
           </ul>
         </aside>
+        <Splitter id="practice-list-w" axis="x" target="prev" min={150} max={0.45} />
 
         <div className="practice-main">
           <div className="practice-step">

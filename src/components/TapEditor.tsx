@@ -4,6 +4,7 @@ import { computePeaks } from "../audio/peaks";
 import { type LrcDoc, formatLrcTime, serializeLrc, sortLines } from "../lyrics/lrc";
 import { type Suggestion, alignLines } from "../lyrics/smartAlign";
 import { formatTime } from "../utils/time";
+import { Splitter } from "../layout/split";
 import {
   NUDGE_SECONDS,
   type TapState,
@@ -526,6 +527,7 @@ export function TapEditor({ song, doc, player, settings, onSaved, onExit, onOpen
         </ol>
       )}
 
+      <Splitter id="wave-h" axis="y" target="next" min={40} max={0.6} />
       <Waveform
         peaks={peaks}
         time={Math.max(0, heard)}

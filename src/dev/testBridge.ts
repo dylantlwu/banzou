@@ -1,3 +1,5 @@
+import { installFakeOutputs } from "./fakeOutputs";
+
 /**
  * 浏览器测试模式（开发服务器 + 地址带 ?test）。
  * 模拟 Tauri 的 invoke / convertFileSrc：命令交给真实的 Rust 后端逻辑（devbridge），
@@ -8,10 +10,13 @@ export function installTestBridge() {
   let cb = 0;
   // ?test&nolib：模拟第一次打开（还没选素材文件夹），点「选择文件夹」后才有曲库
   let noLibrary = new URLSearchParams(location.search).has("nolib");
+  const fakeOutputs = installFakeOutputs();
   w.__TAURI_INTERNALS__ = {
     transformCallback: () => ++cb,
     convertFileSrc: (p: string) => "/@fs" + p.split("/").map(encodeURIComponent).join("/"),
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
+      const faked = fakeOutputs(cmd, args);
+      if (faked) return faked;
       if (noLibrary && cmd === "choose_library_dir") noLibrary = false;
       else if (noLibrary && cmd !== "load_settings" && cmd !== "load_store" && cmd !== "live_info") throw "NO_LIBRARY";
       const res = await fetch(`/__bridge/${cmd}`, { method: "POST", body: JSON.stringify(args) });

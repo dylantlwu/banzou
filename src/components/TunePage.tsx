@@ -11,6 +11,7 @@ import { type Note, applyNotes, segmentNotes } from "../tune/notes";
 import { type TuneDoc, applyHash, defaultDoc, loadTuneDoc, saveTuneDoc } from "../tune/tuneDoc";
 import { type SnapMode, useNoteEditor } from "../tune/useNoteEditor";
 import { formatTime } from "../utils/time";
+import { Splitter } from "../layout/split";
 import { Btn } from "./Btn";
 import { PitchRoll, type RollView } from "./PitchRoll";
 
@@ -413,189 +414,192 @@ export function TunePage({ song, take, dir, lyricsDoc, player, compare, onToggle
         滚轮上下移动 · 横向滑动翻页 · ⌘ + 滚轮缩放 · 点击跳转
       </div>
 
-      {viewMode === "notes" && (
-        <div className="tune-controls notes-bar">
-          <div className="rec-row">
-            <span className="muted small">吸附</span>
-            <div className="segmented">
-              {(
-                [
-                  ["ref", "原唱"],
-                  ["semitone", "半音"],
-                  ["free", "自由"],
-                ] as [SnapMode, string][]
-              ).map(([m, label]) => (
-                <Btn key={m} className={snap === m ? "seg active" : "seg"} onClick={() => setSnap(m)} disabled={m === "ref" && !ref}>
-                  {label}
-                </Btn>
-              ))}
-            </div>
-            <Btn className={editor.splitTool ? "toggle on" : "toggle"} onClick={() => editor.setSplitTool(!editor.splitTool)} title="点音符块切成两个（S）">
-              ✂ 切分
-            </Btn>
-            <Btn className="ghost" onClick={editor.undo} disabled={!editor.canUndo} title="撤销（⌘Z）">
-              ↶ 撤销
-            </Btn>
-            <Btn className="ghost" onClick={editor.redo} disabled={!editor.canRedo} title="重做（⇧⌘Z）">
-              ↷ 重做
-            </Btn>
-            <Btn className="ghost" onClick={editor.resetAll} disabled={!editor.notes.some((n) => n.edited)}>
-              全部还原
-            </Btn>
-            <span className="spacer" />
-            <span className="muted small">
-              上下拖音符改音高（⌥ 自由）· 双击吸附原唱 · ↑↓ 半音 · ⇧↑↓ 10 音分 · ⌘J 合并 · 右键还原
-            </span>
-          </div>
-          {editor.selectedNotes.length > 0 ? (
+      <Splitter id="tune-ctrl-h" axis="y" target="next" min={60} max={0.75} />
+      <div className="tune-ctrl-box">
+        {viewMode === "notes" && (
+          <div className="tune-controls notes-bar">
             <div className="rec-row">
-              <span className="small">
-                已选 {editor.selectedNotes.length} 个音
-                {editor.selectedNotes.length === 1 && ` · 音高 ${editor.selectedNotes[0].offset > 0 ? "+" : ""}${editor.selectedNotes[0].offset} 音分`}
-              </span>
-              {(
-                [
-                  ["straighten", "拉直", 0, 1, 0.05, (v: number) => `${Math.round(v * 100)}%`],
-                  ["vibrato", "颤音", 0, 2, 0.05, (v: number) => `${Math.round(v * 100)}%`],
-                  ["transition", "过渡", 0, 200, 5, (v: number) => `${v}ms`],
-                ] as const
-              ).map(([key, label, min, max, step, fmt]) => {
-                const v = editor.selectedNotes[0][key];
-                return (
-                  <label key={key} className="rec-field">
-                    <span className="muted small">{label}</span>
-                    <input
-                      type="range"
-                      min={min}
-                      max={max}
-                      step={step}
-                      value={v}
-                      onChange={(e) => editor.setParam({ [key]: Number(e.target.value) }, true)}
-                      onPointerUp={() => editor.commitCurrent()}
-                      onKeyUp={() => editor.commitCurrent()}
-                    />
-                    <span className="small">{fmt(v)}</span>
-                  </label>
-                );
-              })}
-              <Btn className="ghost" onClick={editor.resetSelected}>
-                还原
-              </Btn>
-            </div>
-          ) : (
-            <p className="rec-msg muted">点一个音符块选中（⇧ 多选），{tunedPath ? "改完会自动重新渲染这一段" : "第一次改动会先把整首修音渲染一遍"}。</p>
-          )}
-        </div>
-      )}
-
-      {doc && viewMode === "curve" && (
-        <div className="tune-controls">
-          <div className="rec-row">
-            <span className="muted small">参考</span>
-            <div className="segmented">
-              <Btn className={doc.params.reference === "vocal" ? "seg active" : "seg"} onClick={() => setParams({ reference: "vocal" })} disabled={!ref}>
-                原唱
-              </Btn>
-              <Btn className={doc.params.reference === "scale" ? "seg active" : "seg"} onClick={() => setParams({ reference: "scale" })}>
-                音阶
-              </Btn>
-            </div>
-            <label className="rec-field">
-              <span className="muted small">调</span>
-              <select value={KEYS.findIndex((k) => k.tonic === doc.params.key.tonic && k.mode === doc.params.key.mode)} onChange={(e) => setParams({ key: KEYS[Number(e.target.value)] })}>
-                {KEYS.map((k, i) => (
-                  <option key={i} value={i}>
-                    {keyName(k)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="rec-field" title="修正偏差的多少">
-              <span className="muted small">强度</span>
-              <input type="range" min={0} max={1} step={0.05} value={doc.params.strength} onChange={(e) => setParams({ strength: Number(e.target.value) })} />
-              <span className="small">{pct(doc.params.strength)}</span>
-            </label>
-            <label className="rec-field" title="慢 = 保留颤音和滑音，自然；快 = 电音感">
-              <span className="muted small">自然</span>
-              <input type="range" min={0} max={1} step={0.05} value={doc.params.speed} onChange={(e) => setParams({ speed: Number(e.target.value) })} />
-              <span className="muted small">电音</span>
-            </label>
-            <label className="small check" title="用录音前那 2 秒环境底噪做参考去掉底噪">
-              <input type="checkbox" checked={doc.denoise} onChange={(e) => update({ denoise: e.target.checked })} />
-              降噪
-            </label>
-            <span className="spacer" />
-            {doc.lines.length > 0 && <span className="muted small">只修选中的 {doc.lines.length} 句</span>}
-            <Btn className="primary" onClick={() => void apply()} disabled={applying || !result}>
-              {applying ? "修音中…" : tunedPath && !stale ? "重新应用" : "应用修音"}
-            </Btn>
-          </div>
-          <div className="rec-row">
-            <span className="muted small">效果</span>
-            <div className="segmented">
-              {(Object.keys(PRESET_NAMES) as Preset[]).map((p) => (
-                <Btn key={p} className={doc.fx.preset === p ? "seg active" : "seg"} onClick={() => setFx({ preset: p })}>
-                  {PRESET_NAMES[p]}
-                </Btn>
-              ))}
-            </div>
-            {(["eq", "comp", "reverb"] as const).map((k) => (
-              <label key={k} className="small check">
-                <input type="checkbox" checked={doc.fx[k]} onChange={(e) => setFx({ [k]: e.target.checked })} />
-                {k === "eq" ? "均衡" : k === "comp" ? "压缩" : "混响"}
-              </label>
-            ))}
-            <label className="rec-field">
-              <span className="muted small">人声</span>
-              <input type="range" min={0} max={1.5} step={0.05} value={doc.fx.voiceGain} onChange={(e) => setFx({ voiceGain: Number(e.target.value) })} />
-            </label>
-            <label className="rec-field">
-              <span className="muted small">伴奏</span>
-              <input type="range" min={0} max={1.5} step={0.05} value={doc.fx.accGain} onChange={(e) => setFx({ accGain: Number(e.target.value) })} />
-            </label>
-          </div>
-          {stale && <p className="rec-msg muted">参数改过了，现在听到的「修后」还是上次的结果，点「应用修音」更新。</p>}
-          {result && result.inTuneBefore < 0.4 && doc.params.reference === "vocal" && (
-            <p className="rec-msg muted">跑调的地方比较多：修完会有明显机器感，严重的句子建议用补录重唱一遍。</p>
-          )}
-        </div>
-      )}
-
-      {exporting && (
-        <div className="export-panel">
-          <label className="rec-field">
-            <span className="muted small">文件名</span>
-            <input className="url-input" value={exportName} onChange={(e) => setExportName(e.target.value)} />
-          </label>
-          <label className="small check">
-            <input type="checkbox" checked={exportMix} onChange={(e) => setExportMix(e.target.checked)} />
-            成品（伴奏 + 人声，带效果）wav + m4a
-          </label>
-          <label className="small check">
-            <input type="checkbox" checked={exportDry} onChange={(e) => setExportDry(e.target.checked)} />
-            修后干声 wav（拿去别的软件继续做）
-          </label>
-          <div className="rec-row">
-            <Btn className="primary" onClick={() => void runExport()} disabled={progress !== null && progress < 1 || (!exportMix && !exportDry)}>
-              {progress !== null && progress < 1 ? `导出中 ${Math.round(progress * 100)}%` : "开始导出"}
-            </Btn>
-            {!tunedPath && <span className="muted small">还没应用修音，会导出原始录音</span>}
-          </div>
-          <p className="muted small">保存到素材文件夹的「录音 / {title} / 导出」。回到演唱页，录音列表下面的「导出的成品」里也能找到。</p>
-          {exported.length > 0 && (
-            <ul className="export-files">
-              {exported.map((f) => (
-                <li key={f}>
-                  <span className="small">{f.split("/").pop()}</span>
-                  <Btn className="link" onClick={() => void invoke("reveal_file", { path: f })}>
-                    在访达中显示
+              <span className="muted small">吸附</span>
+              <div className="segmented">
+                {(
+                  [
+                    ["ref", "原唱"],
+                    ["semitone", "半音"],
+                    ["free", "自由"],
+                  ] as [SnapMode, string][]
+                ).map(([m, label]) => (
+                  <Btn key={m} className={snap === m ? "seg active" : "seg"} onClick={() => setSnap(m)} disabled={m === "ref" && !ref}>
+                    {label}
                   </Btn>
-                </li>
+                ))}
+              </div>
+              <Btn className={editor.splitTool ? "toggle on" : "toggle"} onClick={() => editor.setSplitTool(!editor.splitTool)} title="点音符块切成两个（S）">
+                ✂ 切分
+              </Btn>
+              <Btn className="ghost" onClick={editor.undo} disabled={!editor.canUndo} title="撤销（⌘Z）">
+                ↶ 撤销
+              </Btn>
+              <Btn className="ghost" onClick={editor.redo} disabled={!editor.canRedo} title="重做（⇧⌘Z）">
+                ↷ 重做
+              </Btn>
+              <Btn className="ghost" onClick={editor.resetAll} disabled={!editor.notes.some((n) => n.edited)}>
+                全部还原
+              </Btn>
+              <span className="spacer" />
+              <span className="muted small">
+                上下拖音符改音高（⌥ 自由）· 双击吸附原唱 · ↑↓ 半音 · ⇧↑↓ 10 音分 · ⌘J 合并 · 右键还原
+              </span>
+            </div>
+            {editor.selectedNotes.length > 0 ? (
+              <div className="rec-row">
+                <span className="small">
+                  已选 {editor.selectedNotes.length} 个音
+                  {editor.selectedNotes.length === 1 && ` · 音高 ${editor.selectedNotes[0].offset > 0 ? "+" : ""}${editor.selectedNotes[0].offset} 音分`}
+                </span>
+                {(
+                  [
+                    ["straighten", "拉直", 0, 1, 0.05, (v: number) => `${Math.round(v * 100)}%`],
+                    ["vibrato", "颤音", 0, 2, 0.05, (v: number) => `${Math.round(v * 100)}%`],
+                    ["transition", "过渡", 0, 200, 5, (v: number) => `${v}ms`],
+                  ] as const
+                ).map(([key, label, min, max, step, fmt]) => {
+                  const v = editor.selectedNotes[0][key];
+                  return (
+                    <label key={key} className="rec-field">
+                      <span className="muted small">{label}</span>
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={v}
+                        onChange={(e) => editor.setParam({ [key]: Number(e.target.value) }, true)}
+                        onPointerUp={() => editor.commitCurrent()}
+                        onKeyUp={() => editor.commitCurrent()}
+                      />
+                      <span className="small">{fmt(v)}</span>
+                    </label>
+                  );
+                })}
+                <Btn className="ghost" onClick={editor.resetSelected}>
+                  还原
+                </Btn>
+              </div>
+            ) : (
+              <p className="rec-msg muted">点一个音符块选中（⇧ 多选），{tunedPath ? "改完会自动重新渲染这一段" : "第一次改动会先把整首修音渲染一遍"}。</p>
+            )}
+          </div>
+        )}
+
+        {doc && viewMode === "curve" && (
+          <div className="tune-controls">
+            <div className="rec-row">
+              <span className="muted small">参考</span>
+              <div className="segmented">
+                <Btn className={doc.params.reference === "vocal" ? "seg active" : "seg"} onClick={() => setParams({ reference: "vocal" })} disabled={!ref}>
+                  原唱
+                </Btn>
+                <Btn className={doc.params.reference === "scale" ? "seg active" : "seg"} onClick={() => setParams({ reference: "scale" })}>
+                  音阶
+                </Btn>
+              </div>
+              <label className="rec-field">
+                <span className="muted small">调</span>
+                <select value={KEYS.findIndex((k) => k.tonic === doc.params.key.tonic && k.mode === doc.params.key.mode)} onChange={(e) => setParams({ key: KEYS[Number(e.target.value)] })}>
+                  {KEYS.map((k, i) => (
+                    <option key={i} value={i}>
+                      {keyName(k)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="rec-field" title="修正偏差的多少">
+                <span className="muted small">强度</span>
+                <input type="range" min={0} max={1} step={0.05} value={doc.params.strength} onChange={(e) => setParams({ strength: Number(e.target.value) })} />
+                <span className="small">{pct(doc.params.strength)}</span>
+              </label>
+              <label className="rec-field" title="慢 = 保留颤音和滑音，自然；快 = 电音感">
+                <span className="muted small">自然</span>
+                <input type="range" min={0} max={1} step={0.05} value={doc.params.speed} onChange={(e) => setParams({ speed: Number(e.target.value) })} />
+                <span className="muted small">电音</span>
+              </label>
+              <label className="small check" title="用录音前那 2 秒环境底噪做参考去掉底噪">
+                <input type="checkbox" checked={doc.denoise} onChange={(e) => update({ denoise: e.target.checked })} />
+                降噪
+              </label>
+              <span className="spacer" />
+              {doc.lines.length > 0 && <span className="muted small">只修选中的 {doc.lines.length} 句</span>}
+              <Btn className="primary" onClick={() => void apply()} disabled={applying || !result}>
+                {applying ? "修音中…" : tunedPath && !stale ? "重新应用" : "应用修音"}
+              </Btn>
+            </div>
+            <div className="rec-row">
+              <span className="muted small">效果</span>
+              <div className="segmented">
+                {(Object.keys(PRESET_NAMES) as Preset[]).map((p) => (
+                  <Btn key={p} className={doc.fx.preset === p ? "seg active" : "seg"} onClick={() => setFx({ preset: p })}>
+                    {PRESET_NAMES[p]}
+                  </Btn>
+                ))}
+              </div>
+              {(["eq", "comp", "reverb"] as const).map((k) => (
+                <label key={k} className="small check">
+                  <input type="checkbox" checked={doc.fx[k]} onChange={(e) => setFx({ [k]: e.target.checked })} />
+                  {k === "eq" ? "均衡" : k === "comp" ? "压缩" : "混响"}
+                </label>
               ))}
-            </ul>
-          )}
-        </div>
-      )}
+              <label className="rec-field">
+                <span className="muted small">人声</span>
+                <input type="range" min={0} max={1.5} step={0.05} value={doc.fx.voiceGain} onChange={(e) => setFx({ voiceGain: Number(e.target.value) })} />
+              </label>
+              <label className="rec-field">
+                <span className="muted small">伴奏</span>
+                <input type="range" min={0} max={1.5} step={0.05} value={doc.fx.accGain} onChange={(e) => setFx({ accGain: Number(e.target.value) })} />
+              </label>
+            </div>
+            {stale && <p className="rec-msg muted">参数改过了，现在听到的「修后」还是上次的结果，点「应用修音」更新。</p>}
+            {result && result.inTuneBefore < 0.4 && doc.params.reference === "vocal" && (
+              <p className="rec-msg muted">跑调的地方比较多：修完会有明显机器感，严重的句子建议用补录重唱一遍。</p>
+            )}
+          </div>
+        )}
+
+        {exporting && (
+          <div className="export-panel">
+            <label className="rec-field">
+              <span className="muted small">文件名</span>
+              <input className="url-input" value={exportName} onChange={(e) => setExportName(e.target.value)} />
+            </label>
+            <label className="small check">
+              <input type="checkbox" checked={exportMix} onChange={(e) => setExportMix(e.target.checked)} />
+              成品（伴奏 + 人声，带效果）wav + m4a
+            </label>
+            <label className="small check">
+              <input type="checkbox" checked={exportDry} onChange={(e) => setExportDry(e.target.checked)} />
+              修后干声 wav（拿去别的软件继续做）
+            </label>
+            <div className="rec-row">
+              <Btn className="primary" onClick={() => void runExport()} disabled={progress !== null && progress < 1 || (!exportMix && !exportDry)}>
+                {progress !== null && progress < 1 ? `导出中 ${Math.round(progress * 100)}%` : "开始导出"}
+              </Btn>
+              {!tunedPath && <span className="muted small">还没应用修音，会导出原始录音</span>}
+            </div>
+            <p className="muted small">保存到素材文件夹的「录音 / {title} / 导出」。回到演唱页，录音列表下面的「导出的成品」里也能找到。</p>
+            {exported.length > 0 && (
+              <ul className="export-files">
+                {exported.map((f) => (
+                  <li key={f}>
+                    <span className="small">{f.split("/").pop()}</span>
+                    <Btn className="link" onClick={() => void invoke("reveal_file", { path: f })}>
+                      在访达中显示
+                    </Btn>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
       {comp && <p className="muted small tune-foot">录音覆盖 {formatTime(comp.start)}–{formatTime(comp.start + comp.seconds)}</p>}
     </section>
   );

@@ -203,7 +203,11 @@
 /* ---------- 曲库栏 ---------- */
 
 .lib {
-  width: clamp(220px, 22vw, 280px);
+  flex: none;
+  width: var(--lib-w, clamp(220px, 22vw, 280px));
+  min-width: 180px;
+  /* 至少给歌曲区留 480px */
+  max-width: min(45vw, calc(100vw - 64px - 480px));
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
@@ -584,11 +588,21 @@
   gap: 4px;
 }
 
+/* 窗口或歌曲区变窄时右边的牌子换到下一行，进度条不会被挤没 */
 .tbar-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
+  gap: 8px 18px;
+}
+
+.tbar-row > .tbar-timeline {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
+.tbar-row > .tbar-knobs {
+  margin-left: auto;
 }
 
 .tbar-transport {
@@ -728,9 +742,26 @@
 
 .learn-mode {
   flex: 1;
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) minmax(260px, 320px);
+  display: flex;
   min-height: 0;
+}
+
+.learn-mode > .learn-lines {
+  flex: none;
+  width: var(--learn-lines-w, 220px);
+  min-width: 140px;
+  max-width: 40%;
+}
+
+.learn-mode > .learn-card {
+  flex: 1;
+}
+
+.learn-mode > .teacher {
+  flex: none;
+  width: var(--teacher-w, 300px);
+  min-width: 240px;
+  max-width: 55%;
 }
 
 .learn-lines {
@@ -775,12 +806,23 @@
 }
 
 .learn-card {
-  padding: 26px 34px;
+  padding: 26px 34px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 这一句那块：笔记拉高时它变矮，内容多了自己滚 */
+.learn-focus {
+  flex: 1;
+  min-height: 60px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .learn-orig {
@@ -805,9 +847,17 @@
 }
 
 .learn-mode-notes {
-  margin-top: 10px;
   border-top: 1px solid var(--line);
   padding-top: 14px;
+  flex: none;
+  height: var(--learn-notes-h, auto);
+  min-height: 60px;
+  max-height: 85%;
+  overflow-y: auto;
+}
+
+.learn-card > .split-y {
+  margin: 10px 0 -14px;
 }
 
 .learn-mode .teacher {
@@ -883,4 +933,149 @@
 
 .settings-pane .dialog-actions {
   margin-top: auto;
+}
+
+/* ---------- 可拖动的分界线 ----------
+   平时就是原来那条 1px 的线；分界线本身不占地方，两边各 3px 是能抓的范围 */
+
+.split {
+  flex: none;
+  position: relative;
+  z-index: 4;
+  touch-action: none;
+}
+
+.split-x {
+  width: 0;
+  align-self: stretch;
+}
+
+.split-y {
+  height: 0;
+}
+
+.split::before {
+  content: "";
+  position: absolute;
+}
+
+.split-x::before {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.split-y::before {
+  left: 0;
+  right: 0;
+  top: -3px;
+  height: 6px;
+  cursor: row-resize;
+}
+
+/* 拖的时候整页都是这个光标，也不会选中文字 */
+body.resizing-x,
+body.resizing-x * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.resizing-y,
+body.resizing-y * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+.app.shell.big > .split {
+  display: none;
+}
+
+/* 录音模式：歌词 ↔ 右边录音列表（分界线贴着录音列表左边那条线） */
+.lyrics-body > .split-x {
+  margin-right: -16px;
+}
+
+.lyrics-body > .takes {
+  width: var(--takes-w, 250px);
+  min-width: 200px;
+  max-width: 60%;
+}
+
+/* 录音列表里：上面的列表 ↔ 下面选中这一遍的设置和导出的成品 */
+.takes > .split-y {
+  margin-top: 6px;
+}
+
+.takes-bottom {
+  flex: none;
+  height: var(--takes-bottom-h, auto);
+  min-height: 80px;
+  max-height: 80%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.takes-bottom > .take-detail:first-child {
+  margin-top: 0;
+}
+
+/* 歌词 ↔ 音高窗口 */
+.lyrics-area > .split-y {
+  margin-top: 8px;
+}
+
+.lyrics-area > .split-y + .sing-pitch {
+  margin-top: 0;
+}
+
+.lyrics-area > .sing-pitch {
+  height: var(--pitch-h, auto);
+  min-height: 70px;
+  max-height: 50%;
+}
+
+.lyrics-area > .sing-pitch canvas {
+  flex: 1 1 150px;
+  height: auto;
+  min-height: 40px;
+}
+
+.app.big .lyrics-area > .sing-pitch canvas {
+  flex-basis: 210px;
+}
+
+/* 打轴页：歌词列表 ↔ 波形；修音页：音高图 ↔ 下面的参数 */
+.editor > .split-y {
+  margin-bottom: -10px;
+}
+
+.editor .waveform {
+  height: var(--wave-h, 72px);
+  min-height: 40px;
+  max-height: 60%;
+}
+
+.tune-ctrl-box {
+  flex: none;
+  height: var(--tune-ctrl-h, auto);
+  min-height: 60px;
+  max-height: 75%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 练声：左边练习列表 ↔ 右边 */
+.practice-body > .split-x {
+  margin-left: -16px;
+}
+
+.practice-body > .practice-list {
+  width: var(--practice-list-w, 210px);
+  min-width: 150px;
+  max-width: 45%;
 }

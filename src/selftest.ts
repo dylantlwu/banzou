@@ -7,6 +7,11 @@ import { invoke } from "@tauri-apps/api/core";
 const log = (m: string) => invoke("debug_log", { message: `${new Date().toISOString()} ${m}` }).catch(() => {});
 
 export async function runSelftestIfEnabled() {
+  const mode = await invoke<string>("selftest_mode").catch(() => "");
+  if (mode === "output") {
+    const { runOutputSelftest } = await import("./audio/outputSelftest");
+    return runOutputSelftest(log);
+  }
   if (!(await invoke<boolean>("selftest_enabled").catch(() => false))) return;
   await log("selftest start, ua=" + navigator.userAgent);
   await log("mediaDevices=" + Boolean(navigator.mediaDevices) + " getUserMedia=" + Boolean(navigator.mediaDevices?.getUserMedia));

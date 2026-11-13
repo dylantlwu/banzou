@@ -88,7 +88,7 @@ export class Recorder {
   private levelBuf = new Float32Array(2048);
   label = "";
 
-  constructor(private readonly ctx: AudioContext) {}
+  constructor(readonly ctx: AudioContext) {}
 
   get sampleRate(): number {
     return this.ctx.sampleRate;

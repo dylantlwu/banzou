@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { NOTE_NAMES, OFF_CENTS } from "../tune/autotune";
+import { useRedrawOnResize } from "../layout/useRedrawOnResize";
 
 export interface RollData {
   hop: number;
@@ -41,6 +42,7 @@ interface Props {
 /** 钢琴卷帘：灰 = 原唱、蓝 = 我的（跑调 > 30 音分标橙、加粗）、黑/白 = 修后（PRD 4.5） */
 export function PitchRoll({ data, view, time, onSeek, onView, overlay, onPointer, onDoubleClick, onContextMenu, cursor }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const sizeTick = useRedrawOnResize(ref);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -162,7 +164,7 @@ export function PitchRoll({ data, view, time, onSeek, onView, overlay, onPointer
     const px = xOf(time);
     ctx.fillStyle = accent;
     ctx.fillRect(px - 0.75, 0, 1.5, h);
-  }, [data, view, time, overlay]);
+  }, [data, view, time, overlay, sizeTick]);
 
   const at = (e: { clientX: number; clientY: number }) => {
     const rect = ref.current!.getBoundingClientRect();

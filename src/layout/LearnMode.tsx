@@ -5,6 +5,7 @@ import { TeacherNotes } from "../learn/TeacherNotes";
 import { type NotesView, loadNotes } from "../learn/api";
 import { type LrcDoc, effectiveTime, findLineIndex } from "../lyrics/lrc";
 import { formatTime } from "../utils/time";
+import { Splitter } from "./split";
 
 export interface LearnLine {
   /** 在 doc.lines 里的位置 */
@@ -110,26 +111,30 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
           </div>
         ))}
       </nav>
+      <Splitter id="learn-lines-w" axis="x" target="prev" min={140} max={0.4} />
 
       <section className="learn-card">
-        {focus ? (
-          <>
-            <div className="learn-orig">{focus.text}</div>
-            <div className="learn-act">
-              <Btn className="primary big-btn" onClick={() => play(focus)} disabled={focus.start === null}>
-                放这一句
-              </Btn>
-              {loop && (
-                <Btn className="ghost" onClick={onClearLoop} title="取消 A-B，接着往下放">
-                  放整首
+        <div className="learn-focus">
+          {focus ? (
+            <>
+              <div className="learn-orig">{focus.text}</div>
+              <div className="learn-act">
+                <Btn className="primary big-btn" onClick={() => play(focus)} disabled={focus.start === null}>
+                  放这一句
                 </Btn>
-              )}
-            </div>
-            <p className="muted small">读音、意思、难点和「听 / 念 / 唱 / 点评」四步还在做；现在可以一句一句放，有问题问右边的老师。</p>
-          </>
-        ) : (
-          <p className="muted">选一句开始</p>
-        )}
+                {loop && (
+                  <Btn className="ghost" onClick={onClearLoop} title="取消 A-B，接着往下放">
+                    放整首
+                  </Btn>
+                )}
+              </div>
+              <p className="muted small">读音、意思、难点和「听 / 念 / 唱 / 点评」四步还在做；现在可以一句一句放，有问题问右边的老师。</p>
+            </>
+          ) : (
+            <p className="muted">选一句开始</p>
+          )}
+        </div>
+        <Splitter id="learn-notes-h" axis="y" target="next" min={60} max={0.85} />
         <div className="learn-notes learn-mode-notes">
           {annotations.length > 0 && <p className="muted small">歌曲自带的标注：{annotations.join(" / ")}</p>}
           <h3>老师笔记 · 这首歌</h3>
@@ -140,6 +145,7 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
         </div>
       </section>
 
+      <Splitter id="teacher-w" axis="x" target="next" min={240} max={0.55} />
       <TeacherChat title={title} onNotesChanged={reload} />
     </div>
   );

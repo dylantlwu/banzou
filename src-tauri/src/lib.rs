@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod audio_out;
 pub mod dsp;
 pub mod learn;
 pub mod library;
@@ -178,6 +179,12 @@ fn selftest_enabled() -> bool {
     std::env::var("BANZOU_SELFTEST").is_ok_and(|v| v == "1")
 }
 
+/// 诊断：BANZOU_SELFTEST=output 时前端在真机上放一段轻音、记录切出声设备时声音有没有跟上（`src/audio/outputSelftest.ts`）
+#[tauri::command]
+fn selftest_mode() -> String {
+    std::env::var("BANZOU_SELFTEST").unwrap_or_default()
+}
+
 /// 诊断日志写到应用日志目录 selftest.log
 #[tauri::command]
 fn debug_log(app: tauri::AppHandle, message: String) -> Result<(), String> {
@@ -260,6 +267,20 @@ async fn audio_route() -> Result<serde_json::Value, String> {
     tauri::async_runtime::spawn_blocking(move || transcribe::route(&helper))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// 出声设备列表和当前系统默认（只读）
+#[tauri::command]
+fn audio_outputs() -> audio_out::OutputsSnapshot {
+    audio_out::snapshot()
+}
+
+/// 用户在系统设置 / 控制中心里切了出声设备、或设备插拔了：发 `audio-output-changed` 给前端，播放器确认声音跟过去
+fn start_output_watcher(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    let _ = audio_out::watch(Box::new(move || {
+        let _ = app.emit("audio-output-changed", audio_out::snapshot());
+    }));
 }
 
 // ---------- 修音 / 导出（M3） ----------
@@ -709,6 +730,7 @@ pub fn run() {
                 let _ = use_library(app.handle(), dir);
             }
             start_tv_request_watcher(app.handle().clone());
+            start_output_watcher(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -727,6 +749,7 @@ pub fn run() {
             live_audio,
             open_live_window,
             selftest_enabled,
+            selftest_mode,
             debug_log,
             rec_begin,
             rec_append,
@@ -737,6 +760,7 @@ pub fn run() {
             trash_takes,
             abnormal_recordings,
             audio_route,
+            audio_outputs,
             analyze_pitch,
             render_take,
             render_tuned,
