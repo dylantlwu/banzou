@@ -1,0 +1,48 @@
+/* 设置里的「网络」（PRD 5.4「网络路线」） */
+
+.net-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.net-table td {
+  padding: 5px 8px 5px 0;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.net-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.net-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.net-name b {
+  font-weight: 500;
+}
+
+.net-table select {
+  font: inherit;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.net-result {
+  min-width: 120px;
+}
+
+/* 状态色避开红绿：通 = 蓝，绕路才通 = 黄，不通 = 红（error-text） */
+.net-ok {
+  color: var(--good);
+}
+
+.net-warn {
+  color: var(--ok);
+}

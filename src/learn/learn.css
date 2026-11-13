@@ -1,0 +1,225 @@
+/* 外语学唱（PRD 4.12）：问老师、老师笔记 */
+
+.dialog.learn-dialog {
+  width: min(980px, calc(100vw - 32px));
+  height: min(720px, calc(100vh - 48px));
+  padding: 18px 20px;
+  gap: 12px;
+}
+
+.learn-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.learn-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(300px, 380px);
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+
+.learn-notes {
+  overflow-y: auto;
+  padding: 12px 18px 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.learn-notes h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+/* 一本笔记 */
+.teacher-notes ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.teacher-notes li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 7px;
+  line-height: 1.5;
+}
+
+.teacher-notes li:hover {
+  background: var(--hover);
+}
+
+.teacher-notes .note-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.teacher-notes .note-btns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+.teacher-notes li:hover .note-btns {
+  opacity: 1;
+}
+
+.teacher-notes textarea,
+.teacher .remembered textarea {
+  flex: 1;
+  width: 100%;
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.note-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.note-add input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* 老师（右栏） */
+.teacher {
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.teacher-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.teacher-head-btns {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.teacher-head-btns .on {
+  color: var(--accent);
+}
+
+.teacher-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.teacher .msg {
+  padding: 8px 11px;
+  border-radius: 10px;
+  line-height: 1.55;
+  max-width: 92%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.teacher .msg.t {
+  background: var(--hover);
+  align-self: flex-start;
+}
+
+.teacher .msg.me {
+  background: var(--accent-soft);
+  align-self: flex-end;
+}
+
+.teacher .msg .say {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* 老师记下的笔记：手写便签的感觉，左边一道橙线 */
+.teacher .remembered {
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  white-space: normal;
+}
+
+.teacher .remembered b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.teacher .remembered.undone {
+  color: var(--muted);
+  border-left-color: var(--line);
+  text-decoration: line-through;
+}
+
+.remembered-btns {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.teacher-error {
+  padding: 0 12px;
+}
+
+.teacher-ask {
+  border-top: 1px solid var(--line);
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.teacher-ask textarea {
+  flex: 1;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  resize: none;
+}
+
+.teacher-ask-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
