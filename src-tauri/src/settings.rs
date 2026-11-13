@@ -9,7 +9,7 @@ use std::path::Path;
 const FILE_NAME: &str = "settings.json";
 
 /// 其他小数据（练声记录等）也存成同目录下的 JSON，名字必须在这个白名单里
-pub const STORES: &[&str] = &["practice"];
+pub const STORES: &[&str] = &["practice", "tv", "tags", "plays"];
 
 pub fn load(dir: &Path) -> io::Result<Value> {
     load_file(dir, FILE_NAME)

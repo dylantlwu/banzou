@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>波点 遥控</title>
+<style>
+  :root { --paper:#E8E7E4; --card:#F3F1EC; --line:#CBC6BE; --ink:#262220; --graphite:#262220; --grey:#7E7C78; --mid:#77797C; --silver:#B4B7BA; --frost:#F4F4F1; --clay:#9A6A60;
+    /* v8：地毯的颜色。靛蓝 = 浅色上的点缀；燕麦色 = 深色上的点缀 */
+    --indigo:#3A4458; --indigo-deep:#2B3446; --oat:#D9CFBE; --cream:#E6DED0;
+    --font: 'Noto Serif', 'Iowan Old Style', Georgia, 'PingFang SC', 'Noto Sans CJK SC', serif; --sans: 'PingFang SC', 'Noto Sans CJK SC', sans-serif; }
+  html[lang=zh-Hant] { --font: 'Noto Serif', 'Iowan Old Style', Georgia, 'PingFang TC', 'Noto Sans CJK TC', serif; --sans: 'PingFang TC', 'Noto Sans CJK TC', sans-serif; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html { background: var(--paper); }
+  body { margin: 0 auto; max-width: 720px; min-height: 100vh; position: relative;
+    /* v8：一道很淡的斜光，像丝缎 */
+    background: linear-gradient(112deg, #E8E7E4 0%, #F2F2EF 16%, #E2E1DE 33%, #EBEAE7 50%, #F4F4F1 64%, #E1E0DD 82%, #E9E8E5 100%) fixed var(--paper); color: var(--ink);
+    font: 400 16px/1.4 var(--font); padding: 0 22px calc(92px + env(safe-area-inset-bottom)); overflow-x: hidden; }
+  .top { display: flex; align-items: center; height: 84px; border-bottom: 1px solid rgba(38,34,32,.55); margin-bottom: 24px; }
+  .lockup { display: inline-flex; align-items: center; gap: 12px; }
+  .lockup .wm { display: flex; flex-direction: column; line-height: 1; }
+  .lockup .wm b { font: 400 21px/1 var(--sans); letter-spacing: .42em; }
+  .lockup .wm i { font: 400 8px/1 var(--font); font-style: normal; letter-spacing: .62em; margin-top: 7px; opacity: .62; }
+
+  h2 { font: 400 12.5px/1 var(--font); color: var(--grey); letter-spacing: .22em; margin: 34px 0 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 10px; }
+  html[lang=en] h2 { text-transform: uppercase; font-size: 11.5px; letter-spacing: .24em; }
+  h2 .n { color: var(--indigo); font-size: 14px; letter-spacing: 0; }
+  .sub { color: var(--grey); font-size: 13.5px; line-height: 1.6; }
+  button { font: inherit; color: var(--ink); background: none; border: 1.5px solid var(--ink); border-radius: 0; min-height: 46px; padding: 0 16px; cursor: pointer; letter-spacing: .06em; -webkit-appearance: none; appearance: none; }
+  button:active { background: var(--graphite); color: var(--frost); }
+  svg.ic { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.6; flex: none; pointer-events: none; }
+
+  #err { display: none; border-left: 4px solid var(--clay); background: #EADFDB; padding: 12px 14px; margin-bottom: 18px; font-size: 14.5px; line-height: 1.55; }
+
+  /* 正在唱：一张细线框的浅卡片 */
+  .now { background: var(--card); border: 1.5px solid var(--graphite); padding: 22px 22px 20px; box-shadow: 0 5px 0 rgba(40,40,42,.07); }
+  .now .lab { font-size: 11.5px; color: var(--grey); letter-spacing: .24em; min-height: 12px; }
+  html[lang=en] .now .lab { text-transform: uppercase; }
+  .now .t { font: 400 28px/1.25 var(--font); margin: 8px 0 2px; overflow-wrap: anywhere; }
+  .now .a { font-size: 14px; color: var(--grey); letter-spacing: .16em; min-height: 4px; }
+  .bar { height: 2px; background: var(--line); margin: 20px 0 8px; position: relative; }
+  .bar i { display: block; height: 100%; background: var(--indigo); position: relative; width: 0; }
+  .bar i::after { content: ""; position: absolute; right: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--indigo); }
+  .times { display: flex; justify-content: space-between; font-size: 12px; color: var(--grey); font-variant-numeric: tabular-nums; }
+  .next { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 14px; color: var(--grey); letter-spacing: .04em; }
+  .next b { font-weight: 400; color: var(--ink); margin-left: 8px; }
+
+  .big3 { display: flex; justify-content: space-between; align-items: center; margin: 28px 18px 4px; }
+  .big3 div { text-align: center; font-size: 13px; color: var(--grey); letter-spacing: .1em; }
+  .big3 button { display: flex; align-items: center; justify-content: center; width: 66px; height: 66px; border-radius: 50%; padding: 0; margin: 0 auto 10px; }
+  .big3 button svg { width: 28px; height: 28px; }
+  .big3 .main button { width: 92px; height: 92px; background: var(--graphite); color: var(--frost); border: 0; box-shadow: inset 0 0 0 5px var(--graphite), inset 0 0 0 6.5px var(--oat); }
+  .big3 .main button:active { opacity: .8; }
+  .big3 .main button svg { width: 34px; height: 34px; fill: currentColor; stroke: none; }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
+  .seg { display: flex; border: 1.5px solid var(--ink); height: 46px; cursor: pointer; }
+  .seg span { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--grey); font-size: 15px; letter-spacing: .06em; }
+  .seg span.on { background: var(--graphite); color: var(--frost); }
+  .wide { width: 100%; margin-top: 12px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+
+  /* 滑杆：一根细线，一颗圆点 */
+  .slider { display: flex; align-items: center; gap: 14px; height: 52px; }
+  .slider label { width: 52px; flex: none; }
+  .slider span { width: 30px; text-align: right; color: var(--grey); font-variant-numeric: tabular-nums; }
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; min-width: 0; height: 36px; background: none; margin: 0; --v: 50%; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; background: linear-gradient(90deg, var(--indigo) var(--v), var(--line) var(--v)); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -10px; border-radius: 50%; background: var(--graphite); border: 3px solid var(--paper); box-shadow: 0 0 0 1.5px var(--graphite); }
+  input[type=range]::-moz-range-track { height: 2px; background: linear-gradient(90deg, var(--indigo) var(--v), var(--line) var(--v)); }
+  input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--graphite); border: 3px solid var(--paper); }
+  .block { padding-top: 10px; }
+
+  .offset { display: flex; align-items: center; gap: 10px; margin: 8px 0 12px; }
+  .offset b { flex: 1; text-align: center; font-weight: 400; font-size: 18px; letter-spacing: .08em; }
+  .offset button { min-height: 42px; min-width: 92px; }
+
+  /* 列表：只有细线，没有盒子 */
+  .row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .row .no { width: 26px; font-size: 14px; color: var(--indigo); flex: none; }
+  .row .t { flex: 1; min-width: 0; font-size: 18px; overflow-wrap: anywhere; }
+  .row .t small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--grey); letter-spacing: .04em; }
+  .row button { min-height: 36px; padding: 0 14px; font-size: 14px; flex: none; }
+  .row button.icon { width: 36px; padding: 0; display: flex; align-items: center; justify-content: center; border-color: var(--line); }
+  .row button.icon svg { width: 18px; height: 18px; }
+  .row button.del { color: var(--clay); }
+  .tag { font-size: 12.5px; padding: 4px 9px; border: 1.5px solid currentColor; white-space: nowrap; flex: none; letter-spacing: .06em; }
+  .tag.picked { color: var(--frost); background: var(--indigo); border-color: var(--indigo); }
+  .tag.sending { color: var(--ink); border: 1.5px dashed var(--mid); }
+  .search { display: flex; align-items: center; gap: 10px; border-bottom: 1.5px solid var(--ink); height: 52px; margin-top: 6px; color: var(--grey); }
+  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; color: var(--ink); border-radius: 0; -webkit-appearance: none; }
+  .search input::placeholder { color: var(--grey); }
+  .mini { display: flex; align-items: center; gap: 10px; background: var(--graphite); color: var(--frost); padding: 12px 12px 12px 18px; box-shadow: inset 0 0 0 4px var(--graphite), inset 0 0 0 5.5px var(--oat); }
+  .mini .t { flex: 1; min-width: 0; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini .t small { display: block; font-size: 10.5px; color: var(--oat); letter-spacing: .22em; margin-bottom: 3px; }
+  html[lang=en] .mini .t small { text-transform: uppercase; }
+  .mini button { width: 40px; min-height: 40px; padding: 0; border-radius: 50%; border-color: rgba(240,240,238,.5); color: var(--frost); display: flex; align-items: center; justify-content: center; }
+  .mini button svg { width: 18px; height: 18px; }
+
+  .langs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+  .langs button { font-size: 15px; letter-spacing: .04em; }
+  .langs button.on { background: var(--graphite); color: var(--frost); }
+
+  /* 底下两个页签：浅木色的一条，像这一页的地板 */
+  nav { position: fixed; left: 50%; bottom: 0; width: 100%; max-width: 720px; transform: translateX(-50%); display: flex; padding: 0 22px calc(10px + env(safe-area-inset-bottom)); border-top: 1.5px solid var(--indigo-deep);
+    /* v8：米白的地毯边，最下面一排 20×10 的小菱形（和电视下面那条地毯同一个花纹） */
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='10'%3E%3Crect width='20' height='10' fill='%233A4458'/%3E%3Cpath d='M10 0.5L18.5 5L10 9.5L1.5 5Z' fill='%23E6DED0'/%3E%3Cpath d='M10 3L14 5L10 7L6 5Z' fill='%233A4458'/%3E%3C/svg%3E") left bottom / 20px 10px repeat-x, var(--cream); }
+  nav a { flex: 1; height: 64px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #5E6880; text-decoration: none; font-size: 16px; letter-spacing: .16em; position: relative; }
+  nav a.on { color: var(--ink); }
+  nav a.on::before { content: ""; position: absolute; left: 34%; right: 34%; top: -1px; height: 3px; background: var(--graphite); }
+  nav a .n { color: var(--indigo); font-size: 14px; letter-spacing: 0; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15"/><rect x="14" y="4.5" width="4" height="15"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 4.5 L19 12 L8 19.5 Z"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M5 12 a7 7 0 1 0 2.2 -5.1"/><path d="M4 3.5 V8 H8.5"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M5 5 L14 12 L5 19 Z"/><path d="M18.5 5 V19"/></symbol>
+  <symbol id="i-top" viewBox="0 0 24 24"><path d="M5 4 H19"/><path d="M12 20 V9"/><path d="M6.5 13.5 L12 8.5 L17.5 13.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6 L18 18 M18 6 L6 18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15.5 15.5 L20 20"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12"/><path d="M8 21 H16"/></symbol>
+</svg>
+
+<div class="top"><span class="lockup" id="brand"></span></div>
+<div id="err" data-t="rOffline"></div>
+
+<!-- 页签一：遥控 -->
+<main id="tab-ctl">
+  <div class="now">
+    <div class="lab" id="lab"></div>
+    <div class="t" id="now"></div>
+    <div class="a" id="artist"></div>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="times" id="times"><span id="pos"></span><span id="dur"></span></div>
+    <div class="next" id="next"></div>
+  </div>
+
+  <div class="big3">
+    <div><button data-t-aria="restart" onclick="act('restart')"><svg class="ic"><use href="#i-restart"/></svg></button><span data-t="restart"></span></div>
+    <div class="main"><button id="bPause" onclick="act('pause')"><svg class="ic"><use id="iPause" href="#i-pause"/></svg></button><span id="lPause"></span></div>
+    <div><button data-t-aria="skip" onclick="act('next')"><svg class="ic"><use href="#i-next"/></svg></button><span data-t="skip"></span></div>
+  </div>
+
+  <div class="two">
+    <div class="seg" id="vocalSeg" onclick="act('vocalToggle')"><span data-t="segVocalOn"></span><span data-t="segVocalOff"></span></div>
+    <div class="seg" id="lyricSeg" onclick="act('lyrics')"><span data-t="segLyricsOn"></span><span data-t="segLyricsOff"></span></div>
+  </div>
+  <button class="wide" onclick="act('panel')"><svg class="ic"><use href="#i-tv"/></svg><span data-t="rOpenPick"></span></button>
+
+  <h2 data-t="volume"></h2>
+  <div class="block">
+    <div class="slider"><label data-t="music"></label><input id="music" type="range" min="0" max="100" step="1"><span id="musicV"></span></div>
+    <div class="slider"><label data-t="vocal"></label><input id="vocal" type="range" min="0" max="100" step="1"><span id="vocalV"></span></div>
+    <div class="sub" data-t="rVocalHint"></div>
+  </div>
+
+  <h2 data-t="lyricTiming"></h2>
+  <div class="block">
+    <div class="offset"><button data-t="earlier" onclick="act('offset',{v:S.offset-50})"></button><b id="offset"></b><button data-t="later" onclick="act('offset',{v:S.offset+50})"></button></div>
+    <div class="sub" data-t="rTimingHint"></div>
+  </div>
+
+  <!-- 语言：默认跟手机系统走；手机和电视各选各的 -->
+  <h2 data-t="language"></h2>
+  <div class="langs" id="langs"></div>
+</main>
+
+<!-- 页签二：点歌 -->
+<main id="tab-pick" hidden>
+  <div class="mini" id="mini" hidden>
+    <div class="t"><small data-t="nowSinging"></small><span id="miniNow"></span></div>
+    <button id="bPause2" onclick="act('pause')"><svg class="ic" style="fill:currentColor;stroke:none"><use id="iPause2" href="#i-pause"/></svg></button>
+    <button data-t-aria="skip" onclick="act('next')"><svg class="ic"><use href="#i-next"/></svg></button>
+  </div>
+  <h2><span data-t="queue"></span><span class="n" id="qn"></span></h2>
+  <div id="queue"></div>
+  <h2 data-t="library"></h2>
+  <label class="search"><svg class="ic"><use href="#i-search"/></svg><input type="search" id="q" data-t-ph="rSearchPh"></label>
+  <div id="songs"></div>
+</main>
+
+<nav>
+  <a href="#" data-tab="ctl" class="on"><span data-t="tabRemote"></span></a>
+  <a href="#" data-tab="pick"><span data-t="tabSongs"></span><span class="n" id="navn"></span></a>
+</nav>
+
+<script>
+// ---------- 文字：三种语言（和电视上同一套说法）。每条：[简体, 繁體, English]。歌名、歌手不翻译 ----------
+const STR = {
+  rTitle: ["波点 遥控", "波點 遙控", "波点 Remote"],
+  rOffline: ["连不上电视：电视要开着并打开「波点」，手机和电视要在同一个网络。", "無法連接電視：請確認電視已開啟「波點」，且手機與電視使用同一個網路。", "Can’t reach the TV. Open 波点 on the TV and join the same Wi-Fi."],
+  nowSinging: ["正在唱", "正在唱", "Now singing"],
+  rNotSinging: ["还没在唱", "尚未開始", "Nothing playing"],
+  rIdleNext: ["去「点歌」里点一首", "到「點歌」選一首", "Choose a song under Songs"],
+  next: ["下一首", "下一首", "Next"],
+  restart: ["重唱", "重唱", "Restart"],
+  pause: ["暂停", "暫停", "Pause"],
+  resume: ["继续", "繼續", "Resume"],
+  skip: ["切歌", "切歌", "Skip"],
+  segVocalOn: ["原唱", "原唱", "Vocals"],
+  segVocalOff: ["伴唱", "伴唱", "Off"],
+  segLyricsOn: ["歌词开", "歌詞開", "Lyrics"],
+  segLyricsOff: ["关", "關", "Off"],
+  rOpenPick: ["在电视上打开点歌", "在電視上開啟點歌", "Show the song list on TV"],
+  volume: ["音量", "音量", "Volume"],
+  music: ["伴奏", "伴奏", "Music"],
+  vocal: ["人声", "人聲", "Vocals"],
+  rVocalHint: ["人声就是原唱的声音。拉到 0 是伴唱，拉一点点可以当「导唱」跟着唱。", "人聲即原唱的聲音。調到 0 為伴唱，稍微調高可作為「導唱」跟著唱。", "Vocals is the original singer. At 0 it is pure karaoke; a little helps you follow along."],
+  lyricTiming: ["歌词时间", "歌詞時間", "Lyric timing"],
+  earlier: ["早一点", "早一點", "Earlier"],
+  later: ["晚一点", "晚一點", "Later"],
+  onTime: ["准时", "準時", "On time"],
+  rTimingHint: ["接蓝牙音箱时声音会晚一点。歌词变色比歌声早，就点「晚一点」。", "連接藍牙喇叭時聲音會稍慢。若歌詞變色比歌聲早，請按「晚一點」。", "Bluetooth speakers add a slight delay. If the lyrics change colour before the singing, tap Later."],
+  language: ["语言", "語言", "Language"],
+  followSystem: ["跟随系统", "跟隨系統", "System default"],
+  queue: ["已点", "已點", "Queue"],
+  queueEmpty: ["还没点歌", "尚未點歌", "The queue is empty"],
+  library: ["曲库", "全部歌曲", "All songs"],
+  rSearchPh: ["搜歌名、歌手，或者首字母（JMXS）", "搜尋歌名、歌手，或拼音首字母", "Title, artist or initials (TD)"],
+  rOnPc: ["在电脑上，点了会传过来", "在電腦上，點選後傳送", "Transfers from computer"],
+  rPick: ["点歌", "點歌", "Select"],
+  rSing: ["唱", "唱", "Sing"],
+  rSinging: ["正在唱", "正在唱", "Singing"],
+  tagPicked: ["已点", "已點", "Queued"],
+  tagSending: ["传送中", "傳送中", "Transferring"],
+  rTop: ["置顶", "置頂", "Move to top"],
+  rDel: ["删", "刪", "Remove"],
+  tabRemote: ["遥控", "遙控", "Remote"],
+  tabSongs: ["点歌", "點歌", "Songs"],
+  noMatch: ["没找到「{q}」", "找不到「{q}」", "Nothing for “{q}”"],
+  brand: ["波点", "波點", "波点"],
+  brandLatin: ["BODIAN", "BODIAN", "BODIAN"],
+  emptyHow: ["在电脑的{app}里点{btn}，歌就传过来了", "在電腦的{app}中按下{btn}，歌曲便會傳送過來", "On your computer, open {app} and choose {btn}"],
+  appName: ["波点", "波點", "波点"],
+  tvBtn: ["电视", "電視", "TV"],
+  rLate: ["晚 {n} 毫秒", "晚 {n} 毫秒", "{n} ms later"],
+  rEarly: ["早 {n} 毫秒", "早 {n} 毫秒", "{n} ms earlier"]
+};
+const LANGS = ["zh-Hans", "zh-Hant", "en"];
+const LANG_NAMES = { "zh-Hans": "简体中文", "zh-Hant": "繁體中文", en: "English" };
+// 选的语言记在这台手机上；读不了、写不了（比如无痕模式）就当没选过
+let chosen = "auto";
+try { const v = localStorage.getItem("bodian-lang"); if (LANGS.includes(v)) chosen = v; } catch (e) {}
+function sysLang() {
+  const l = (navigator.language || "zh-CN").toLowerCase();
+  if (l.startsWith("zh")) return /tw|hk|mo|hant/.test(l) ? "zh-Hant" : "zh-Hans";
+  return "en";
+}
+let lang = chosen === "auto" ? sysLang() : chosen;
+function t(key, vars) {
+  const row = STR[key];
+  if (!row) return key;
+  let s = row[LANGS.indexOf(lang)];
+  if (vars) for (const k in vars) s = s.split("{" + k + "}").join(vars[k]);
+  return s;
+}
+
+let S = { songs: [], queue: [], sending: [], offset: 0 };
+let dragging = null;
+let online = true;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+
+// 徽记：一圈 12 颗珠子，左上方一颗是木珠
+function emblem(size) {
+  let out = `<svg width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="2.6">`;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2 - Math.PI / 2, x = (50 + Math.cos(a) * 33).toFixed(2), y = (50 + Math.sin(a) * 33).toFixed(2);
+    out += i === 10 ? `<circle cx="${x}" cy="${y}" r="7.3" fill="#3A4458" stroke="#3A4458"/>` : `<circle cx="${x}" cy="${y}" r="7.3"/>`;
+  }
+  return out + "</svg>";
+}
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.title = t("rTitle");
+  document.querySelectorAll("[data-t]").forEach((el) => (el.textContent = t(el.dataset.t)));
+  document.querySelectorAll("[data-t-ph]").forEach((el) => (el.placeholder = t(el.dataset.tPh)));
+  document.querySelectorAll("[data-t-aria]").forEach((el) => el.setAttribute("aria-label", t(el.dataset.tAria)));
+  $("brand").innerHTML = emblem(42) + `<span class="wm"><b>${t("brand")}</b><i>${t("brandLatin")}</i></span>`;
+  $("langs").innerHTML = ["auto"].concat(LANGS).map((l) => `<button class="${l === chosen ? "on" : ""}" onclick="setLang('${l}')">${l === "auto" ? t("followSystem") : LANG_NAMES[l]}</button>`).join("");
+  for (const k in shown) delete shown[k];
+  render();
+}
+function setLang(l) {
+  chosen = l;
+  try { l === "auto" ? localStorage.removeItem("bodian-lang") : localStorage.setItem("bodian-lang", l); } catch (e) {}
+  lang = chosen === "auto" ? sysLang() : chosen;
+  applyLang();
+}
+
+async function call(url) {
+  try {
+    const r = await fetch(url, { cache: "no-store" });
+    S = await r.json();
+    online = true;
+  } catch (e) {
+    online = false;
+  }
+  $("err").style.display = online ? "none" : "block";
+  if (online) render();
+}
+function act(c, p = {}) {
+  const qs = new URLSearchParams({ c, ...p });
+  return call("/api/do?" + qs);
+}
+
+function render() {
+  const queue = S.queue || [], sending = S.sending || [], songs = S.songs || [];
+  const playing = !!S.current;
+  $("lab").textContent = playing ? t("nowSinging") : "";
+  $("now").textContent = playing ? S.current : t("rNotSinging");
+  $("artist").textContent = playing ? (S.artist || "") : "";
+  $("next").innerHTML = queue.length ? `${t("next")}<b>${esc(queue[0])}</b>` : playing ? "" : esc(t("rIdleNext"));
+  $("next").hidden = !queue.length && playing;
+  $("prog").style.width = S.duration > 0 ? Math.min(100, S.position / S.duration * 100) + "%" : "0";
+  $("times").hidden = !(S.duration > 0);
+  $("pos").textContent = clock(S.position || 0); $("dur").textContent = clock(S.duration || 0);
+  const paused = playing && !S.playing;
+  $("iPause").setAttribute("href", paused ? "#i-play" : "#i-pause");
+  $("iPause2").setAttribute("href", paused ? "#i-play" : "#i-pause");
+  $("lPause").textContent = paused ? t("resume") : t("pause");
+  $("bPause").setAttribute("aria-label", $("lPause").textContent); $("bPause2").setAttribute("aria-label", $("lPause").textContent);
+  const vs = $("vocalSeg").children, ls = $("lyricSeg").children;
+  vs[0].className = S.vocal > 0 ? "on" : ""; vs[1].className = S.vocal > 0 ? "" : "on";
+  ls[0].className = S.lyrics ? "on" : ""; ls[1].className = S.lyrics ? "" : "on";
+  for (const k of ["music", "vocal"]) {
+    if (dragging !== k && S[k] !== undefined) $(k).value = Math.round(S[k] * 100);
+    $(k).style.setProperty("--v", $(k).value + "%");
+    $(k + "V").textContent = $(k).value;
+  }
+  const off = S.offset || 0;
+  $("offset").textContent = off === 0 ? t("onTime") : t(off > 0 ? "rLate" : "rEarly", { n: Math.abs(off) });
+
+  $("mini").hidden = !playing; $("miniNow").textContent = S.current || "";
+  $("qn").textContent = queue.length || ""; $("navn").textContent = queue.length || "";
+  setHtml("queue", queue.length
+    ? queue.map((title, i) => `<div class="row"><span class="no">${String(i + 1).padStart(2, "0")}</span><div class="t">${esc(title)}</div>` +
+        (sending[i] ? `<span class="tag sending">${t("tagSending")}</span>` : "") +
+        (i > 0 ? `<button class="icon" aria-label="${t("rTop")}" onclick="act('top',{i:${i}})"><svg class="ic"><use href="#i-top"/></svg></button>` : "") +
+        `<button class="icon del" aria-label="${t("rDel")}" onclick="act('remove',{i:${i}})"><svg class="ic"><use href="#i-x"/></svg></button></div>`).join("")
+    : `<div class="row sub">${t("queueEmpty")}</div>`);
+  const q = $("q").value.trim().toLowerCase();
+  const list = songs.filter((s) => !q || s.title.toLowerCase().includes(q) || (s.artist || "").toLowerCase().includes(q) || (s.initials || "").toLowerCase().includes(q));
+  setHtml("songs", list.length
+    ? list.map((s) => {
+        const isCur = playing && (S.currentId ? s.id === S.currentId : s.title === S.current);
+        const sub = [s.artist, s.onTv || s.queued ? "" : t("rOnPc")].filter(Boolean).join(" · ");
+        return `<div class="row"><div class="t">${esc(s.title)}${sub ? `<small>${esc(sub)}</small>` : ""}</div>` +
+          (s.queued ? `<span class="tag ${s.onTv ? "picked" : "sending"}">${isCur ? t("rSinging") : s.onTv ? t("tagPicked") : t("tagSending")}</span>`
+            : `<button onclick="act('pick',{id:'${esc(s.id)}'})">${playing || !s.onTv ? t("rPick") : t("rSing")}</button>`) + `</div>`;
+      }).join("")
+    : `<div class="row sub">${songs.length ? esc(t("noMatch", { q: $("q").value.trim() })) : esc(t("emptyHow", { app: "「" + t("appName") + "」", btn: "「" + t("tvBtn") + "」" }))}</div>`);
+}
+
+// 列表只在内容变了才重画，免得每秒刷新时把正在按的按钮换掉
+const shown = {};
+function setHtml(id, html) {
+  if (shown[id] === html) return;
+  shown[id] = html;
+  $(id).innerHTML = html;
+}
+
+function tab(name) {
+  $("tab-ctl").hidden = name !== "ctl"; $("tab-pick").hidden = name !== "pick";
+  document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("on", a.dataset.tab === name));
+  scrollTo(0, 0);
+}
+document.querySelectorAll("nav a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); tab(a.dataset.tab); }));
+
+for (const k of ["music", "vocal"]) {
+  const el = $(k);
+  el.addEventListener("input", () => { dragging = k; el.style.setProperty("--v", el.value + "%"); $(k + "V").textContent = el.value; act(k, { v: el.value / 100 }); });
+  el.addEventListener("change", () => { dragging = null; });
+}
+$("q").addEventListener("input", render);
+applyLang();
+call("/api/state");
+setInterval(() => { if (!dragging) call("/api/state"); }, 1000);
+</script>
+</body>
+</html>

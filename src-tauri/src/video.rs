@@ -151,7 +151,7 @@ pub(crate) fn first_line_of(cmd: &Path, args: &[&str]) -> Option<String> {
     String::from_utf8_lossy(&out.stdout).lines().next().map(|l| l.trim().to_string())
 }
 
-fn ffmpeg_version(path: &Path) -> Option<String> {
+pub(crate) fn ffmpeg_version(path: &Path) -> Option<String> {
     // "ffmpeg version 7.1 Copyright ..." → "7.1"
     let line = first_line_of(path, &["-hide_banner", "-version"])?;
     Some(line.split_whitespace().nth(2).unwrap_or(&line).to_string())
@@ -166,7 +166,7 @@ pub fn tool_status(dirs: &Dirs) -> ToolStatus {
 }
 
 /// 用系统自带的 curl 取一个小文件（JSON 等）
-fn curl_text(url: &str) -> Result<String, String> {
+pub(crate) fn curl_text(url: &str) -> Result<String, String> {
     let out = Command::new("/usr/bin/curl")
         .args(["-fsSL", "--retry", "2", "--max-time", "30", "-H", "User-Agent: banzou", url])
         .output()
@@ -182,7 +182,7 @@ fn host_of(url: &str) -> &str {
 }
 
 /// 下载一个大文件到 `dest`，边下边把进度写进任务状态
-fn curl_file(dirs: &Dirs, job: &mut Job, url: &str, dest: &Path, size: Option<u64>, label: &str) -> Result<(), String> {
+pub(crate) fn curl_file(dirs: &Dirs, job: &mut Job, url: &str, dest: &Path, size: Option<u64>, label: &str) -> Result<(), String> {
     if cancelled(dirs) {
         return Err("已取消".into());
     }
@@ -236,7 +236,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn make_executable(path: &Path) -> Result<(), String> {
+pub(crate) fn make_executable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
 }
@@ -321,7 +321,7 @@ fn find_ytdlp_exe(dir: &Path) -> Option<PathBuf> {
 }
 
 /// 从 PyPI 的 imageio-ffmpeg 安装包里取出静态 ffmpeg
-fn install_ffmpeg(dirs: &Dirs, job: &mut Job, tmp: &Path) -> Result<(), String> {
+pub(crate) fn install_ffmpeg(dirs: &Dirs, job: &mut Job, tmp: &Path) -> Result<(), String> {
     job.text = "查询 ffmpeg".into();
     write_job(dirs, job);
     let info: Value = serde_json::from_str(&curl_text(FFMPEG_PYPI)?).map_err(|e| e.to_string())?;
