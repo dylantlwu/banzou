@@ -37,6 +37,17 @@ const START_LEAD = 0.03;
  * 所有音轨共用一个 AudioContext，并在同一时钟时刻启动，保证零漂移。
  * 典型用法：伴奏 + 引导人声 + 录音 Take，各自用 GainNode 调音量；录音也在同一个时钟上采集。
  */
+/**
+ * 时钟 → 歌曲位置的对应关系变了：`at` 时钟时刻起从歌曲 `offset` 开始放，`prev` 是变之前放到的位置。
+ * 暂停时 `offset` = `prev` = 停下的位置。
+ */
+export interface TimelineEvent {
+  kind: "play" | "pause" | "seek";
+  at: number;
+  offset: number;
+  prev: number;
+}
+
 export class AudioEngine {
   private readonly ctx = new AudioContext();
   private readonly tracks = new Map<string, LoadedTrack>();
@@ -49,6 +60,8 @@ export class AudioEngine {
   /** 分组效果链（修音页给人声加效果）：组名 → 搭链函数 */
   private readonly chainFactories = new Map<string, (ctx: BaseAudioContext) => { input: AudioNode; output: AudioNode }>();
   private readonly chains = new Map<string, { input: AudioNode; output: AudioNode }>();
+  /** 播放中的时间线变化（开始、暂停、跳转），录音用它把录音切成一段段 */
+  private readonly timelineListeners = new Set<(e: TimelineEvent) => void>();
 
   constructor() {
     this.master = this.ctx.createGain();
@@ -196,20 +209,38 @@ export class AudioEngine {
     const at = this.ctx.currentTime + START_LEAD;
     const offset = this.transport.play(at);
     this.startSources(offset, at);
+    this.emitTimeline({ kind: "play", at, offset, prev: offset });
     return { at, offset };
   }
 
   pause(): void {
+    const wasPlaying = this.transport.playing;
     this.stopSources();
     this.transport.pause();
+    if (wasPlaying) {
+      const pos = this.transport.position();
+      this.emitTimeline({ kind: "pause", at: this.ctx.currentTime, offset: pos, prev: pos });
+    }
+  }
+
+  /** 订阅播放中的时间线变化，返回取消订阅的函数 */
+  onTimeline(fn: (e: TimelineEvent) => void): () => void {
+    this.timelineListeners.add(fn);
+    return () => this.timelineListeners.delete(fn);
+  }
+
+  private emitTimeline(e: TimelineEvent): void {
+    for (const fn of this.timelineListeners) fn(e);
   }
 
   seek(t: number): void {
     if (this.transport.playing) {
+      const prev = this.transport.position();
       this.stopSources();
       const at = this.ctx.currentTime + START_LEAD;
       const offset = this.transport.seek(t, at);
       this.startSources(offset, at);
+      this.emitTimeline({ kind: "seek", at, offset, prev });
     } else {
       this.transport.seek(t);
     }

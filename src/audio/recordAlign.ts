@@ -36,17 +36,35 @@ export function estimateLag(
   window: { from: number; to: number },
   maxLag = 0.15,
 ): LagResult | null {
+  return estimateLagSpans(rec, ref, [{ recStart, from: window.from, to: window.to }], maxLag);
+}
+
+/**
+ * 同上，但录音分成几段（录音中途跳转过）：每段在录音曲线里的起点对应歌曲时间 recStart，
+ * 只用歌曲时间 [from, to]。几段一起算一个偏移（延迟是同一个）。
+ */
+export function estimateLagSpans(
+  rec: Float32Array,
+  ref: Float32Array,
+  spans: { recStart: number; from: number; to: number }[],
+  maxLag = 0.15,
+): LagResult | null {
   const L = Math.round(maxLag / HOP);
-  const base = Math.round(recStart / HOP);
-  const k0 = Math.max(0, Math.ceil((window.from - recStart) / HOP));
-  const k1 = Math.min(rec.length, Math.floor((window.to - recStart) / HOP));
-  if (k1 - k0 < 200) return null; // 少于 2 秒没法判断
+  const parts = spans.map((p) => ({
+    base: Math.round(p.recStart / HOP),
+    k0: Math.max(0, Math.ceil((p.from - p.recStart) / HOP)),
+    k1: Math.min(rec.length, Math.floor((p.to - p.recStart) / HOP)),
+  }));
+  const frames = parts.reduce((n, p) => n + Math.max(0, p.k1 - p.k0), 0);
+  if (frames < 200) return null; // 少于 2 秒没法判断
   const corr: number[] = [];
   for (let lag = -L; lag <= L; lag++) {
     let s = 0;
-    for (let k = k0; k < k1; k++) {
-      const j = base + k + lag;
-      if (j >= 0 && j < ref.length) s += rec[k] * ref[j];
+    for (const { base, k0, k1 } of parts) {
+      for (let k = k0; k < k1; k++) {
+        const j = base + k + lag;
+        if (j >= 0 && j < ref.length) s += rec[k] * ref[j];
+      }
     }
     corr.push(s);
   }

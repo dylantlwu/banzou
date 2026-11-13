@@ -36,13 +36,17 @@ export function useTakes(title: string | null): TakesApi {
       .then((list) => {
         if (cancelled) return;
         setDir(list.dir);
+        const abnormal = list.abnormal.length
+          ? `这首歌有 ${list.abnormal.length} 条异常录音（比歌长很多，多半是忘了停），没放进列表。可以在「资料」里移到废纸篓`
+          : null;
         if (list.recovered.length) {
           const next = [...list.takes, ...list.recovered.map((r) => recoveredTake(r.file, r.seconds))];
           setTakes(next);
           void saveTakes(title, next).catch((e) => setError(String(e)));
-          setError(`上次有 ${list.recovered.length} 条录音没录完就退出了，已经恢复到列表里（时间可能需要手动对齐）`);
+          setError(`上次有 ${list.recovered.length} 条录音没录完就退出了，已经恢复到列表里（时间可能需要手动对齐）` + (abnormal ? `。${abnormal}` : ""));
         } else {
           setTakes(list.takes);
+          setError(abnormal);
         }
       })
       .catch((e) => !cancelled && setError(String(e)));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { AudioEngine, type TrackRegion } from "../audio/engine";
+import { AudioEngine, type TimelineEvent, type TrackRegion } from "../audio/engine";
 
 export interface PlayerTrack {
   id: string;
@@ -49,6 +49,8 @@ export interface Player {
   positionAt: (clock: number) => number;
   /** 开始播放并返回发声时刻（录音对时） */
   playWithClock: () => Promise<{ at: number; offset: number } | null>;
+  /** 录音用：订阅播放中的开始 / 暂停 / 跳转，返回取消订阅的函数 */
+  onTimeline: (fn: (e: TimelineEvent) => void) => () => void;
   loop: LoopRange | null;
   setLoop: (loop: LoopRange | null) => void;
   setGroupChain: (group: string, factory: ((ctx: BaseAudioContext) => { input: AudioNode; output: AudioNode }) | null) => void;
@@ -214,6 +216,7 @@ export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首�
       if (info) setPlaying(true);
       return info;
     }, [engine]),
+    onTimeline: useCallback((fn: (e: TimelineEvent) => void) => engine().onTimeline(fn), [engine]),
     loop,
     setLoop,
     setGroupChain: useCallback((g, f) => engine().setGroupChain(g, f), [engine]),

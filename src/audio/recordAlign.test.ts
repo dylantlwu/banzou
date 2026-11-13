@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { envelopeOf, estimateLag, measureRoundTrip } from "./recordAlign";
+import { envelopeOf, estimateLag, estimateLagSpans, measureRoundTrip } from "./recordAlign";
 
 const SR = 16000;
 
@@ -63,6 +63,28 @@ describe("estimateLag", () => {
 
   it("太短返回 null", () => {
     expect(estimateLag(ref.slice(0, 100), 0, ref, { from: 0, to: 1 })).toBeNull();
+  });
+});
+
+describe("estimateLagSpans（录音中途跳转过）", () => {
+  const voice = syllables(40, 3);
+  const ref = envelopeOf(voice, SR);
+
+  it("前 10 秒 + 跳到 25 秒之后：两段一起算出同一个偏移", () => {
+    // 录音文件：歌曲 0–10 秒，接着歌曲 25–40 秒，整体晚 70ms
+    const joined = new Float32Array(25 * SR);
+    joined.set(voice.slice(0, 10 * SR), 0);
+    joined.set(voice.slice(25 * SR), 10 * SR);
+    const rec = envelopeOf(shifted(joined, 0.07), SR);
+    const r = estimateLagSpans(rec, ref, [
+      { recStart: 0, from: 0, to: 10 },
+      { recStart: 15, from: 25, to: 40 },
+    ])!;
+    expect(Math.abs(r.shift + 0.07)).toBeLessThan(0.01);
+    expect(r.confidence).toBeGreaterThan(1.5);
+    // 当成一整段算（旧的做法）就对不上
+    const wrong = estimateLag(rec, 0, ref, { from: 0, to: 25 });
+    expect(wrong === null || wrong.confidence < r.confidence).toBe(true);
   });
 });
 

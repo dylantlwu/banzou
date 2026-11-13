@@ -44,11 +44,13 @@ export interface TakeList {
   takes: Take[];
   /** 上次没录完就退出、刚被恢复的录音 */
   recovered: { file: string; seconds: number }[];
+  /** 比歌长很多、没有自动恢复的异常录音（资料检查里可以移到废纸篓） */
+  abnormal: { file: string; bytes: number; seconds: number }[];
 }
 
 export async function loadTakes(title: string): Promise<TakeList> {
-  const res = await invoke<{ dir: string; takes: unknown; recovered?: { file: string; seconds: number }[] }>("load_takes", { title });
-  return { dir: res.dir, takes: Array.isArray(res.takes) ? (res.takes as Take[]) : [], recovered: res.recovered ?? [] };
+  const res = await invoke<{ dir: string; takes: unknown; recovered?: TakeList["recovered"]; abnormal?: TakeList["abnormal"] }>("load_takes", { title });
+  return { dir: res.dir, takes: Array.isArray(res.takes) ? (res.takes as Take[]) : [], recovered: res.recovered ?? [], abnormal: res.abnormal ?? [] };
 }
 
 /** 恢复的录音：不知道当时伴奏放到哪了，先从歌曲开头放，需要的话手动微调 */

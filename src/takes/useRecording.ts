@@ -4,13 +4,16 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { estimateLag, envelopeOf, measureRoundTrip } from "../audio/recordAlign";
+import type { TimelineEvent } from "../audio/engine";
+import { estimateLagSpans, envelopeOf, measureRoundTrip } from "../audio/recordAlign";
 import { type InputDevice, Recorder, floatsToBase64, listInputs, pickDefaultInput } from "../audio/recorder";
 import type { Player } from "../player/usePlayer";
 import type { Settings } from "../settings";
 import type { Song } from "../types";
 import { formatTime } from "../utils/time";
-import { type Clip, type Take, newTakeId, nextTakeName, punchIn } from "./takes";
+import { AUTO_STOP_NOTICE, overRecordLimit } from "./recordGuard";
+import { clipsFromSpans, coveredSeconds, overlay, spansFromEvents } from "./recordSpans";
+import { type Take, newTakeId, nextTakeName, punchIn } from "./takes";
 import type { TakesApi } from "./useTakes";
 
 export type RecPhase = "idle" | "opening" | "prep" | "noise" | "countdown" | "recording" | "saving" | "calibrating";
@@ -101,7 +104,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
         setPhase("prep");
       } catch (e) {
         const msg = e instanceof Error ? `${e.message}` : String(e);
-        setError(/NotAllowed|denied|Permission/i.test(msg) ? "没有麦克风权限：请到「系统设置 → 隐私与安全性 → 麦克风」里打开「伴奏歌词」" : msg);
+        setError(/NotAllowed|denied|Permission/i.test(msg) ? "没有麦克风权限：请到「系统设置 → 隐私与安全性 → 麦克风」里打开「波点」" : msg);
         setPhase("prep");
       }
     },
@@ -245,17 +248,31 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       await sleep(1000);
       if (cancelRef.current) return abort(null);
     }
+    // 录音中途跳转（±5 秒、点歌词）或暂停：记下来，存的时候切成几段，各自对齐
+    const timeline: TimelineEvent[] = [];
+    let reachedEnd = false;
+    const unlisten = player.onTimeline((e) => {
+      timeline.push(e);
+      // 播到结尾时播放器会自己暂停、回到 0
+      if (e.kind === "pause" && e.prev >= player.duration - 0.05) reachedEnd = true;
+    });
     const info = await player.playWithClock();
-    if (!info) return abort("伴奏没能开始播放");
+    if (!info) {
+      unlisten();
+      return abort("伴奏没能开始播放");
+    }
     setPhase("recording");
 
-    // 等停止：手动停、播到结尾、补录播过 B 之后 0.5 秒
+    // 等停止：手动停、播到结尾、补录播过 B 之后 0.5 秒；
+    // 暂停了伴奏又忘了停：从开始录算起超过 歌长 + 30 秒自动停（照常保存）
+    const recStartedAt = performance.now();
+    let autoStopped = false;
     await new Promise<void>((resolve) => {
       const timer = window.setInterval(() => {
         const pos = player.getPosition();
-        // 播到结尾时播放器会自己回到 0
-        const ended = range === "punch" ? pos >= loop!.b + 0.5 : pos >= player.duration - 0.05 || pos < info.offset - 0.5;
-        if (ended || cancelRef.current) finish();
+        const ended = range === "punch" ? pos >= loop!.b + 0.5 : reachedEnd || pos >= player.duration - 0.05;
+        if (!ended && overRecordLimit((performance.now() - recStartedAt) / 1000, player.duration)) autoStopped = true;
+        if (ended || autoStopped || cancelRef.current) finish();
       }, 100);
       const finish = () => {
         window.clearInterval(timer);
@@ -264,8 +281,8 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       stopRef.current = finish;
     });
     stopRef.current = null;
-    const endPos = player.getPosition();
-    const stopPos = endPos < info.offset - 0.5 ? player.duration : Math.min(endPos, player.duration);
+    unlisten();
+    const stopPos = reachedEnd ? player.duration : Math.min(player.getPosition(), player.duration);
     player.pause();
     restoreLoop();
     setPhase("saving");
@@ -279,13 +296,13 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       const file = finalPath.split("/").pop()!;
       const samples = concat(all);
       const t0 = firstTime ?? info.at;
-      let songStart = info.offset + (t0 - info.at) - latency / 1000;
-      const from = range === "punch" ? Math.max(loop!.a, info.offset) : info.offset;
-      const to = range === "punch" ? Math.min(loop!.b, stopPos) : stopPos;
-      if (to - from < 1) {
+      const spans = spansFromEvents(timeline.length ? timeline : [{ kind: "play" as const, ...info, prev: info.offset }], stopPos);
+      const punchRange: [number, number] | undefined = range === "punch" ? [loop!.a, loop!.b] : undefined;
+      const raw = clipsFromSpans(spans, { file, t0, latency: latency / 1000, window: punchRange });
+      if (coveredSeconds(raw) < 1) {
         await invoke("trash_takes", { title: song.title, files: [file] }).catch(() => {});
         setPhase("prep");
-        setError("录得太短了，没有保存");
+        setError(autoStopped ? `${AUTO_STOP_NOTICE}。录到的太短了，没有保存` : "录得太短了，没有保存");
         player.setGain("take", settings.myVoiceVolume);
         return;
       }
@@ -293,28 +310,36 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       // 按原唱自动对齐
       let autoAlignMs = 0;
       let alignStatus: "none" | "ok" | "unsure" = "none";
+      let shift = 0;
       const ref = refEnvelope();
       if (ref) {
-        const lag = estimateLag(envelopeOf(samples, sampleRate), songStart, ref, { from, to });
+        const lag = estimateLagSpans(
+          envelopeOf(samples, sampleRate),
+          ref,
+          raw.map((c) => ({ recStart: c.start, from: c.from, to: c.to })),
+        );
         alignStatus = "unsure";
         if (lag && lag.confidence >= MIN_CONFIDENCE) {
-          songStart += lag.shift;
+          shift = lag.shift;
           autoAlignMs = Math.round(lag.shift * 1000);
           alignStatus = "ok";
         }
       }
+      const clips = clipsFromSpans(spans, { file, t0, latency: latency / 1000, shift, autoAlignMs, window: punchRange });
+      const from = clips[0].from;
 
       const noiseEnd = Math.min(NOISE_SECONDS, info.at - t0 - COUNTDOWN) - 0.1;
-      const clip: Clip = { file, start: songStart, from, to, autoAlignMs };
       let take: Take;
       if (range === "punch" && parent) {
         const adjust = parent.adjustMs / 1000;
+        const own = clips.map((c) => ({ ...c, start: c.start - adjust }));
         take = {
           id: newTakeId(),
           name: `${parent.name} · 补录 ${formatTime(loop!.a)}–${formatTime(loop!.b)}`,
           createdAt: new Date().toISOString(),
           starred: false,
-          clips: punchIn(parent, { ...clip, start: clip.start - adjust }, [loop!.a, loop!.b]),
+          // 补录中途没跳转：和以前一样整段 A-B 换成新录的；跳转过：新录到的部分盖上去
+          clips: own.length === 1 ? punchIn(parent, own[0], [loop!.a, loop!.b]) : overlay(parent.clips, own),
           latencyMs: latency,
           adjustMs: parent.adjustMs,
           noise: parent.noise ?? (noiseEnd > 0.5 ? { file, from: 0.1, to: noiseEnd } : undefined),
@@ -329,7 +354,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
           name: nextTakeName(takes.takes),
           createdAt: new Date().toISOString(),
           starred: false,
-          clips: [clip],
+          clips,
           latencyMs: latency,
           adjustMs: 0,
           noise: noiseEnd > 0.5 ? { file, from: 0.1, to: noiseEnd } : undefined,
@@ -340,7 +365,8 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       await takes.add(take);
       player.setGain("take", settings.myVoiceVolume);
       setNotice(
-        `已保存「${take.name}」` +
+        (autoStopped ? `${AUTO_STOP_NOTICE}。` : "") +
+          `已保存「${take.name}」` +
           (alignStatus === "ok"
             ? autoAlignMs
               ? `，按原唱自动对齐 ${autoAlignMs > 0 ? "+" : ""}${autoAlignMs}ms`

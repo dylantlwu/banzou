@@ -4,6 +4,8 @@
 //! - 边录边写：开始时建 `.wav.part`（32 位浮点单声道 WAV，长度先填 0），每秒追加一段，结束时补写长度并改名
 //! - 全部是无状态的文件操作（每次调用都按路径打开），测试模式的一次性进程也能用
 //! - 删除 Take 是把文件移到废纸篓，不直接删
+//! - 异常录音（`.wav.part` 比歌长很多，多半是忘了停）不自动恢复，改名成 `take-NN.异常录音.part`，
+//!   列进资料检查页，用户点了才移到废纸篓（资料清单 §5-9）
 
 use base64::Engine;
 use serde_json::Value;
@@ -15,6 +17,14 @@ use crate::lyrics_store::sanitize_file_stem;
 
 pub const RECORDINGS_DIR: &str = "录音";
 const TAKES_FILE: &str = "takes.json";
+/// 异常录音的后缀：不以 `.wav.part` 结尾，所以不会再被恢复，也不进录音列表
+pub const ABNORMAL_SUFFIX: &str = ".异常录音.part";
+/// 未完成录音超过歌长的这么多倍，算异常
+const ABNORMAL_RATIO: f64 = 1.5;
+/// 不知道歌长时，超过这么长（秒）算异常
+const ABNORMAL_FALLBACK_SECONDS: f64 = 15.0 * 60.0;
+/// 资料检查扫描时，最近这么多秒内还在写的 `.wav.part` 可能正在录，不动
+const BUSY_PART_SECONDS: u64 = 60;
 
 pub fn song_dir(root: &Path, title: &str) -> PathBuf {
     root.join(RECORDINGS_DIR).join(sanitize_file_stem(title))
@@ -82,7 +92,8 @@ pub fn begin(root: &Path, title: &str, sample_rate: u32) -> io::Result<PathBuf> 
     let path = loop {
         let wav = dir.join(format!("take-{n:02}.wav"));
         let part = dir.join(format!("take-{n:02}.wav.part"));
-        if !wav.exists() && !part.exists() {
+        let abnormal = dir.join(format!("take-{n:02}{ABNORMAL_SUFFIX}"));
+        if !wav.exists() && !part.exists() && !abnormal.exists() {
             break part;
         }
         n += 1;
@@ -125,14 +136,116 @@ pub fn discard(root: &Path, part: &Path) -> io::Result<()> {
     fs::remove_file(checked_path(root, part, ".wav.part")?)
 }
 
-/// 上次录到一半退出（崩溃、强制退出）留下的 `.wav.part`：补好长度变成正常的 wav，返回 (文件名, 秒数)
-pub fn recover_parts(root: &Path, title: &str) -> io::Result<Vec<(String, f64)>> {
+/// 一条异常录音（文件名、字节数、按文件头算的秒数）
+#[derive(Debug, Clone, PartialEq)]
+pub struct Abnormal {
+    pub file: String,
+    pub bytes: u64,
+    pub seconds: f64,
+}
+
+impl Abnormal {
+    fn json(&self) -> Value {
+        serde_json::json!({ "file": self.file, "bytes": self.bytes, "seconds": self.seconds })
+    }
+}
+
+/// 未完成 / 异常录音的大小和长度：(字节数 - 44) / (4 × 声道) / 采样率
+fn part_info(path: &Path) -> io::Result<(u64, f64)> {
+    let bytes = fs::metadata(path)?.len();
+    let mut head = [0u8; 44];
+    let mut f = fs::File::open(path)?;
+    let (channels, rate) = match io::Read::read_exact(&mut f, &mut head) {
+        Ok(()) => (u16::from_le_bytes([head[22], head[23]]).max(1), u32::from_le_bytes(head[24..28].try_into().unwrap()).max(1)),
+        Err(_) => (1, 48000),
+    };
+    Ok((bytes, bytes.saturating_sub(44) as f64 / (4.0 * channels as f64) / rate as f64))
+}
+
+/// 这么长的未完成录音算不算异常：超过歌长 1.5 倍；不知道歌长时超过 15 分钟
+pub fn is_abnormal(seconds: f64, song_seconds: Option<f64>) -> bool {
+    match song_seconds.filter(|s| *s > 0.0) {
+        // 短歌按 1.5 倍算太紧（自动停在歌长 + 30 秒），至少要多出 60 秒才算
+        Some(song) => seconds > (song * ABNORMAL_RATIO).max(song + 60.0),
+        None => seconds > ABNORMAL_FALLBACK_SECONDS,
+    }
+}
+
+/// 歌长（秒）：读这首歌 wav 伴奏（没有就读 wav 人声）的文件头。只有 mp3 / m4a 等时返回 None
+pub fn song_seconds(root: &Path, title: &str) -> Option<f64> {
+    let names: Vec<String> = fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .collect();
+    let lib = crate::library::build_library(root, &names);
+    let id = crate::library::normalize_title(title);
+    lib.songs.iter().find(|s| s.id == id || s.title == title).and_then(song_wav_seconds)
+}
+
+fn song_wav_seconds(song: &crate::library::Song) -> Option<f64> {
+    song.accompaniments.iter().chain(&song.vocals).filter(|f| f.format == "wav").find_map(|f| {
+        let r = hound::WavReader::open(&f.path).ok()?;
+        let rate = r.spec().sample_rate;
+        (rate > 0).then(|| r.duration() as f64 / rate as f64)
+    })
+}
+
+/// 把异常的 `take-NN.wav.part` 改名成 `take-NN.异常录音.part`（重名加序号），内容不动
+fn mark_abnormal(part: &Path) -> io::Result<PathBuf> {
+    let name = part.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let stem = name.strip_suffix(".wav.part").unwrap_or(name);
+    let mut target = part.with_file_name(format!("{stem}{ABNORMAL_SUFFIX}"));
+    let mut n = 2;
+    while target.exists() {
+        target = part.with_file_name(format!("{stem} ({n}){ABNORMAL_SUFFIX}"));
+        n += 1;
+    }
+    fs::rename(part, &target)?;
+    Ok(target)
+}
+
+/// 这首歌录音文件夹里已经标成异常的录音
+fn list_abnormal(dir: &Path) -> Vec<Abnormal> {
+    let Ok(entries) = fs::read_dir(dir) else { return vec![] };
+    let mut out: Vec<Abnormal> = entries
+        .flatten()
+        .filter_map(|e| {
+            let file = e.file_name().to_string_lossy().into_owned();
+            if !file.ends_with(ABNORMAL_SUFFIX) || file.starts_with('.') {
+                return None;
+            }
+            let (bytes, seconds) = part_info(&e.path()).ok()?;
+            Some(Abnormal { file, bytes, seconds })
+        })
+        .collect();
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
+}
+
+/// 上次录到一半退出（崩溃、强制退出）留下的 `.wav.part`：补好长度变成正常的 wav，返回 (文件名, 秒数)。
+/// 比歌长很多的（见 `is_abnormal`）不恢复，改名标成异常录音，和以前标过的一起放在第二个返回值里
+pub fn recover_parts(root: &Path, title: &str, song_seconds: Option<f64>) -> io::Result<(Vec<(String, f64)>, Vec<Abnormal>)> {
     let dir = song_dir(root, title);
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(&dir) else { return Ok(out) };
+    let Ok(entries) = fs::read_dir(&dir) else { return Ok((out, vec![])) };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if !name.ends_with(".wav.part") || name.starts_with('.') {
+            continue;
+        }
+        let (_, seconds) = match part_info(&entry.path()) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            r => r?,
+        };
+        if is_abnormal(seconds, song_seconds) {
+            match mark_abnormal(&entry.path()) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                r => {
+                    r?;
+                }
+            }
             continue;
         }
         let wav = finish(root, &entry.path())?;
@@ -145,12 +258,13 @@ pub fn recover_parts(root: &Path, title: &str) -> io::Result<Vec<(String, f64)>>
         out.push((wav.file_name().unwrap().to_string_lossy().into_owned(), bytes as f64 / 4.0 / rate));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
+    Ok((out, list_abnormal(&dir)))
 }
 
-/// 读取 Take 列表：`{"dir": 录音文件夹, "takes": [...], "recovered": [{file, seconds}]}`
-pub fn load_takes(root: &Path, title: &str) -> io::Result<Value> {
-    let recovered = recover_parts(root, title)?;
+/// 读取 Take 列表：`{"dir": 录音文件夹, "takes": [...], "recovered": [{file, seconds}], "abnormal": [{file, bytes, seconds}]}`。
+/// `song_seconds` 是歌长（判断异常录音用，见 `song_seconds`）
+pub fn load_takes(root: &Path, title: &str, song_seconds: Option<f64>) -> io::Result<Value> {
+    let (recovered, abnormal) = recover_parts(root, title, song_seconds)?;
     let dir = song_dir(root, title);
     let takes = match fs::read_to_string(dir.join(TAKES_FILE)) {
         Ok(s) => serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
@@ -161,7 +275,59 @@ pub fn load_takes(root: &Path, title: &str) -> io::Result<Value> {
         .into_iter()
         .map(|(file, seconds)| serde_json::json!({ "file": file, "seconds": seconds }))
         .collect();
-    Ok(serde_json::json!({ "dir": dir.to_string_lossy(), "takes": takes, "recovered": recovered }))
+    let abnormal: Vec<Value> = abnormal.iter().map(Abnormal::json).collect();
+    Ok(serde_json::json!({ "dir": dir.to_string_lossy(), "takes": takes, "recovered": recovered, "abnormal": abnormal }))
+}
+
+/// 资料检查：整个曲库的异常录音 `[{title, file, bytes, seconds}]`（title 用来调 trash_takes）。
+/// 顺手把还没判断过的超长 `.wav.part` 标成异常（最近 1 分钟内还在写的可能正在录，不动；正常长度的留给打开这首歌时恢复）
+pub fn abnormal_recordings(root: &Path) -> io::Result<Vec<Value>> {
+    let rec = root.join(RECORDINGS_DIR);
+    let Ok(dirs) = fs::read_dir(&rec) else { return Ok(vec![]) };
+    let names: Vec<String> = fs::read_dir(root)?
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .collect();
+    let lib = crate::library::build_library(root, &names);
+    let mut out = Vec::new();
+    for d in dirs.flatten() {
+        if !d.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let folder = d.file_name().to_string_lossy().into_owned();
+        let song = lib.songs.iter().find(|s| sanitize_file_stem(&s.title) == folder);
+        let title = song.map_or_else(|| folder.clone(), |s| s.title.clone());
+        let mut song_secs: Option<Option<f64>> = None;
+        for e in fs::read_dir(d.path())?.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".wav.part") || name.starts_with('.') {
+                continue;
+            }
+            let busy = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_none_or(|age| age.as_secs() < BUSY_PART_SECONDS);
+            if busy {
+                continue;
+            }
+            // 同时打开了这首歌（load_takes）时文件可能刚被改名或恢复，跳过
+            let Ok((_, seconds)) = part_info(&e.path()) else { continue };
+            let secs = *song_secs.get_or_insert_with(|| song.and_then(song_wav_seconds));
+            if is_abnormal(seconds, secs) {
+                match mark_abnormal(&e.path()) {
+                    Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                    r => {
+                        r?;
+                    }
+                }
+            }
+        }
+        for a in list_abnormal(&d.path()) {
+            let mut v = a.json();
+            v["title"] = Value::from(title.clone());
+            out.push(v);
+        }
+    }
+    out.sort_by(|a, b| (a["title"].as_str(), a["file"].as_str()).cmp(&(b["title"].as_str(), b["file"].as_str())));
+    Ok(out)
 }
 
 pub fn save_takes(root: &Path, title: &str, takes: &Value) -> io::Result<()> {
@@ -175,12 +341,13 @@ pub fn save_takes(root: &Path, title: &str, takes: &Value) -> io::Result<()> {
     fs::rename(tmp, dir.join(TAKES_FILE))
 }
 
-/// 把这首歌录音文件夹里的若干文件移到废纸篓
+/// 把这首歌录音文件夹里的若干文件（`.wav`，或异常录音）移到废纸篓
 pub fn trash(root: &Path, title: &str, files: &[String], trash_dir: &Path) -> io::Result<()> {
     let dir = song_dir(root, title);
     fs::create_dir_all(trash_dir)?;
     for name in files {
-        let path = checked_path(root, &dir.join(name), ".wav")?;
+        let suffix = if name.ends_with(ABNORMAL_SUFFIX) { ABNORMAL_SUFFIX } else { ".wav" };
+        let path = checked_path(root, &dir.join(name), suffix)?;
         if !path.exists() {
             continue;
         }
@@ -228,10 +395,10 @@ mod tests {
     fn takes_json_roundtrip_and_trash() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert_eq!(load_takes(root, "歌").unwrap()["takes"], serde_json::json!([]));
+        assert_eq!(load_takes(root, "歌", None).unwrap()["takes"], serde_json::json!([]));
         let takes = serde_json::json!([{ "id": "a", "name": "第一遍" }]);
         save_takes(root, "歌", &takes).unwrap();
-        let loaded = load_takes(root, "歌").unwrap();
+        let loaded = load_takes(root, "歌", None).unwrap();
         assert_eq!(loaded["takes"], takes);
         assert!(loaded["dir"].as_str().unwrap().ends_with("录音/歌"));
 
@@ -251,11 +418,122 @@ mod tests {
         let samples: Vec<u8> = vec![0.1f32; 48000].iter().flat_map(|v| v.to_le_bytes()).collect();
         append(root, &part, &base64::engine::general_purpose::STANDARD.encode(&samples)).unwrap();
         // 模拟没调 finish 就退出
-        let loaded = load_takes(root, "歌").unwrap();
+        let loaded = load_takes(root, "歌", None).unwrap();
         assert_eq!(loaded["recovered"][0]["file"], "take-01.wav");
         assert!((loaded["recovered"][0]["seconds"].as_f64().unwrap() - 1.0).abs() < 1e-6);
         assert!(!part.exists());
-        assert!(load_takes(root, "歌").unwrap()["recovered"].as_array().unwrap().is_empty());
+        assert!(load_takes(root, "歌", None).unwrap()["recovered"].as_array().unwrap().is_empty());
+    }
+
+    /// 写一条没 finish 的录音：采样率 rate、seconds 秒
+    fn leftover_part(root: &Path, title: &str, rate: u32, seconds: f64) -> PathBuf {
+        let part = begin(root, title, rate).unwrap();
+        let n = (rate as f64 * seconds).round() as usize;
+        let samples: Vec<u8> = vec![0.1f32; n].iter().flat_map(|v| v.to_le_bytes()).collect();
+        append(root, &part, &base64::engine::general_purpose::STANDARD.encode(&samples)).unwrap();
+        part
+    }
+
+    #[test]
+    fn abnormal_rule() {
+        assert!(!is_abnormal(300.0, Some(240.0)));
+        assert!(!is_abnormal(360.0, Some(240.0)));
+        assert!(is_abnormal(361.0, Some(240.0)));
+        // 短歌：自动停在歌长 + 前置 + 30 秒的不算异常
+        assert!(!is_abnormal(95.0, Some(60.0)));
+        assert!(is_abnormal(121.0, Some(60.0)));
+        // 不知道歌长：15 分钟
+        assert!(!is_abnormal(900.0, None));
+        assert!(is_abnormal(901.0, None));
+        assert!(is_abnormal(901.0, Some(0.0)));
+    }
+
+    #[test]
+    fn overlong_part_is_marked_not_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let part = leftover_part(root, "歌", 1000, 63.0);
+        // 歌长 2 秒：63 秒超过 1.5 倍、也多出 60 秒以上
+        let loaded = load_takes(root, "歌", Some(2.0)).unwrap();
+        assert!(loaded["recovered"].as_array().unwrap().is_empty());
+        assert_eq!(loaded["abnormal"][0]["file"], "take-01.异常录音.part");
+        assert_eq!(loaded["abnormal"][0]["bytes"], 44 + 63000 * 4);
+        assert!((loaded["abnormal"][0]["seconds"].as_f64().unwrap() - 63.0).abs() < 1e-6);
+        assert!(!part.exists());
+        let marked = song_dir(root, "歌").join("take-01.异常录音.part");
+        let before = fs::read(&marked).unwrap();
+        // 再读一次：不恢复、不重复改名，内容不动
+        let again = load_takes(root, "歌", None).unwrap();
+        assert!(again["recovered"].as_array().unwrap().is_empty());
+        assert_eq!(again["abnormal"].as_array().unwrap().len(), 1);
+        assert_eq!(fs::read(&marked).unwrap(), before);
+        // 新录音不占这个编号
+        assert!(begin(root, "歌", 1000).unwrap().ends_with("take-02.wav.part"));
+        // 移到废纸篓
+        let trash_dir = root.join("trash");
+        trash(root, "歌", &["take-01.异常录音.part".into()], &trash_dir).unwrap();
+        assert!(!marked.exists());
+        assert!(trash_dir.join("歌-take-01.异常录音.part").exists());
+    }
+
+    #[test]
+    fn normal_part_still_recovered_with_song_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        leftover_part(root, "歌", 1000, 2.5);
+        let loaded = load_takes(root, "歌", Some(2.0)).unwrap();
+        assert_eq!(loaded["recovered"][0]["file"], "take-01.wav");
+        assert!(loaded["abnormal"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_song_length_uses_15_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        leftover_part(root, "短", 100, 14.0 * 60.0);
+        assert_eq!(load_takes(root, "短", None).unwrap()["recovered"][0]["file"], "take-01.wav");
+        leftover_part(root, "长", 100, 16.0 * 60.0);
+        let loaded = load_takes(root, "长", None).unwrap();
+        assert!(loaded["recovered"].as_array().unwrap().is_empty());
+        assert_eq!(loaded["abnormal"][0]["file"], "take-01.异常录音.part");
+    }
+
+    #[test]
+    fn reads_song_length_from_wav_accompaniment() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let spec = hound::WavSpec { channels: 2, sample_rate: 1000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(root.join("月光 - 伴奏.wav"), spec).unwrap();
+        for _ in 0..3000 * 2 {
+            w.write_sample(0i16).unwrap();
+        }
+        w.finalize().unwrap();
+        fs::write(root.join("别的 - 伴奏.mp3"), b"x").unwrap();
+        assert_eq!(song_seconds(root, "月光"), Some(3.0));
+        assert_eq!(song_seconds(root, "别的"), None);
+        assert_eq!(song_seconds(root, "没有"), None);
+    }
+
+    #[test]
+    fn check_scan_marks_idle_overlong_parts_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert!(abnormal_recordings(root).unwrap().is_empty());
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        // 很久没动的超长录音：标成异常
+        let idle = leftover_part(root, "甲", 100, 16.0 * 60.0);
+        fs::File::options().write(true).open(&idle).unwrap().set_modified(old).unwrap();
+        // 正在写的超长录音：不动
+        let busy = leftover_part(root, "乙", 100, 16.0 * 60.0);
+        // 正常长度：留给打开这首歌时恢复
+        let normal = leftover_part(root, "丙", 100, 60.0);
+        fs::File::options().write(true).open(&normal).unwrap().set_modified(old).unwrap();
+        let list = abnormal_recordings(root).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["title"], "甲");
+        assert_eq!(list[0]["file"], "take-01.异常录音.part");
+        assert!(!idle.exists() && busy.exists() && normal.exists());
+        assert_eq!(abnormal_recordings(root).unwrap().len(), 1);
     }
 
     #[test]
