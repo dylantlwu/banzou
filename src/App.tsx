@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Btn, isTyping } from "./components/Btn";
@@ -25,7 +25,6 @@ import { songName } from "./songs/meta";
 import { SongInfoDialog } from "./songs/SongInfoDialog";
 import { type TagStore, displayArtist, langEraLine, loadTags, normalizeStore, songId } from "./tags";
 import { TvDialog } from "./components/TvDialog";
-import { LearnDialog } from "./learn/LearnDialog";
 import { type SepTarget, VideoDialog } from "./components/VideoDialog";
 import { useLiveSync } from "./live/liveSync";
 import { useGoLive } from "./live/useGoLive";
@@ -37,48 +36,25 @@ import { type PlayerTrack, usePlayer } from "./player/usePlayer";
 import { DEFAULT_SETTINGS, type Settings, loadSettings, saveSettings } from "./settings";
 import type { Library, MediaFile, Song } from "./types";
 import { formatTime } from "./utils/time";
+import { type SettingsTab } from "./components/SettingsDialog";
+import { LibraryColumn } from "./layout/LibraryColumn";
+import { LearnMode } from "./layout/LearnMode";
+import { type Place, Rail } from "./layout/Rail";
+import { CornerToggles, type SongMode, SongHeader } from "./layout/SongHeader";
+import { TransportBar } from "./layout/TransportBar";
+import { TunePicker } from "./layout/TunePicker";
+import { useAutoRescan } from "./layout/useAutoRescan";
 import "./App.css";
+import "./layout/layout.css";
 
 const SKIP_SECONDS = 5;
-const OFFSET_STEP_MS = 50;
 
-type Mode = "sing" | "tap" | "tune" | "practice";
+/** 这首歌的四种模式（v10 顶栏）+ 打轴页、练声页 */
+type Mode = SongMode | "tap" | "practice";
 interface Source {
   kind: "accompaniment" | "external";
   label: string;
   file: MediaFile;
-}
-
-function PlayIcon({ playing }: { playing: boolean }) {
-  return playing ? (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <rect x="6" y="5" width="4" height="14" rx="1" />
-      <rect x="14" y="5" width="4" height="14" rx="1" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" />
-    </svg>
-  );
-}
-
-function SongBadges({ song }: { song: Song }) {
-  const badges: [string, boolean][] = [
-    [song.accompaniments[0] ? `伴奏 ${song.accompaniments[0].format}` : "伴奏", song.accompaniments.length > 0],
-    ["人声", song.vocals.length > 0],
-    ["歌词", song.lyrics !== null],
-    ["原曲", song.originals.length > 0],
-    ["录音", song.externalRecordings.length > 0],
-  ];
-  return (
-    <div className="badges">
-      {badges.map(([label, on]) => (
-        <span key={label} className={on ? "badge on" : "badge"}>
-          {label}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function formatOffset(ms: number): string {
@@ -91,6 +67,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const settingsLoaded = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [liveOpen, setLiveOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -107,8 +84,6 @@ export default function App() {
   const [tvOpen, setTvOpen] = useState(false);
   const [tvBusy, setTvBusy] = useState<string | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
-  /** 外语学唱（PRD 4.12）：问老师、老师笔记 */
-  const [learnOpen, setLearnOpen] = useState(false);
   const [tagBusy, setTagBusy] = useState<string | null>(null);
   const dialogOpen = settingsOpen || liveOpen || compOpen || tvOpen;
   useEffect(() => {
@@ -136,6 +111,10 @@ export default function App() {
   const [sourceIndex, setSourceIndex] = useState(0);
   const [mode, setMode] = useState<Mode>("sing");
   const [vocalOn, setVocalOn] = useState(false);
+  /** 曲库栏开着没有（学唱时自动收起；⌘\ 或左栏「曲库」切换） */
+  const [libOpen, setLibOpen] = useState(true);
+  /** 学唱：只放人声（伴奏静音） */
+  const [learnSolo, setLearnSolo] = useState(true);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -262,18 +241,9 @@ export default function App() {
     };
   }, [library]);
   const tagsOf = useCallback((song: Song) => tags.songs[tagIds.get(song.id) ?? ""], [tags, tagIds]);
+  const idOf = useCallback((song: Song) => tagIds.get(song.id) ?? song.songId, [tagIds]);
 
   const selected = useMemo(() => library?.songs.find((s) => s.id === selectedId) ?? null, [library, selectedId]);
-
-  // ---------- 搜索 ----------
-  const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
-  const shownSongs = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!library) return [];
-    if (!q) return library.songs;
-    return library.songs.filter((s) => s.title.toLowerCase().includes(q) || songName(s).toLowerCase().includes(q) || (displayArtist(tagsOf(s), s.artist) ?? "").toLowerCase().includes(q));
-  }, [library, query, tagsOf]);
 
   // ---------- 全屏大字（F） ----------
   const [big, setBig] = useState(false);
@@ -308,7 +278,9 @@ export default function App() {
   // ---------- 录音 Take ----------
   const takesApi = useTakes(selected?.title ?? null);
   /** 回放的录音（只在伴奏音源下叠加） */
-  const playTake = source?.kind === "accompaniment" && mode === "sing" ? takesApi.selected : null;
+  const playTake = source?.kind === "accompaniment" && mode === "record" ? takesApi.selected : null;
+  /** 唱歌 / 学唱 / 录音：共用演唱页的播放和混音（修音、打轴页各自管） */
+  const singLike = mode === "sing" || mode === "learn" || mode === "record";
   // 修音页：要修的那遍、现在放的人声文件（修前 / 修后）
   const [tuneTakeId, setTuneTakeId] = useState<string | null>(null);
   const tuneTake = mode === "tune" ? (takesApi.takes.find((t) => t.id === tuneTakeId) ?? null) : null;
@@ -323,8 +295,11 @@ export default function App() {
   const transpose = mode === "tune" ? (tuneTake?.transpose ?? 0) : selected ? (settings.transposeBySong[selected.title] ?? 0) : 0;
   // 变速不变调：播放速度 × 把音频预先移调 −12·log2(速度) 个半音抵消音调变化
   const [speed, setSpeed] = useState(1);
-  useEffect(() => setSpeed(1), [selectedId]);
-  const playSpeed = mode === "sing" ? speed : 1;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  // 换歌时速度回到 1x（学唱默认 0.75x）
+  useEffect(() => setSpeed(modeRef.current === "learn" ? 0.75 : 1), [selectedId]);
+  const playSpeed = singLike ? speed : 1;
   const semitones = Math.round((transpose - 12 * Math.log2(playSpeed)) * 100) / 100;
   const [transposed, setTransposed] = useState<{ key: string; acc: string; vocal: string | null } | null>(null);
   const [transposeError, setTransposeError] = useState<string | null>(null);
@@ -357,7 +332,9 @@ export default function App() {
 
   // ---------- 播放 ----------
   // 选中录音时 V 的含义变成「我的声音 ↔ 原唱」对比；没选录音时是引导人声开关
-  const vocalGain = playTake ? (vocalOn ? 1 : 0) : vocalOn ? settings.vocalGuideVolume : 0;
+  const solo = mode === "learn" && learnSolo && !!selected?.vocals[0];
+  const vocalGain = playTake ? (vocalOn ? 1 : 0) : solo ? 1 : vocalOn ? settings.vocalGuideVolume : 0;
+  const accGain = solo ? 0 : settings.accompanimentVolume;
   const takeGain = playTake && !vocalOn ? settings.myVoiceVolume : 0;
   const tracks = useMemo<PlayerTrack[] | null>(() => {
     if (!selected) return null;
@@ -386,11 +363,11 @@ export default function App() {
 
   // 演唱模式下的混音；打轴模式由编辑器接管
   useEffect(() => {
-    if (mode !== "sing") return;
-    setGain("accompaniment", settings.accompanimentVolume);
+    if (!singLike) return;
+    setGain("accompaniment", accGain);
     setGain("vocal", vocalGain);
     setGain("take", takeGain);
-  }, [mode, settings.accompanimentVolume, vocalGain, takeGain, setGain, ready]);
+  }, [singLike, accGain, vocalGain, takeGain, setGain, ready]);
 
   const rec = useRecording({ player, song: selected, takes: takesApi, settings, updateSettings, transpose });
   const recBusy = rec.phase !== "idle" && rec.phase !== "prep" && rec.phase !== "opening";
@@ -398,10 +375,8 @@ export default function App() {
   // 演唱页按选的速度播放（打轴页、修音页各自管速度）
   const { setRate: setPlayerRate } = player;
   useEffect(() => {
-    if (mode === "sing" && ready) setPlayerRate(speed);
-  }, [mode, speed, ready, setPlayerRate]);
-  const recordStartRef = useRef(0);
-  if (rec.phase === "countdown") recordStartRef.current = player.position;
+    if (singLike && ready) setPlayerRate(speed);
+  }, [singLike, speed, ready, setPlayerRate]);
 
   // ---------- 歌词 ----------
   const [lyricsDoc, setLyricsDoc] = useState<LrcDoc | null>(null);
@@ -533,7 +508,7 @@ export default function App() {
   const heard = player.playing ? player.position - (settings.outputLatencyMs / 1000) * player.rate : player.position;
 
   // ---------- 音高窗口（原唱音高 + 我唱的） ----------
-  const pitchVocal = settings.showPitch && mode === "sing" && hasVocal ? selected!.vocals[0].path : null;
+  const pitchVocal = settings.showPitch && (mode === "sing" || mode === "record") && hasVocal ? selected!.vocals[0].path : null;
   const [refPitch, setRefPitch] = useState<{ path: string; ref: RefPitch | null; error: string | null } | null>(null);
   useEffect(() => {
     if (!pitchVocal || refPitch?.path === pitchVocal) return;
@@ -584,9 +559,49 @@ export default function App() {
     setSourceIndex(0);
   };
 
+  /** 从学唱去别处：速度回到 1x、曲库栏打开（goMode 之外的入口用） */
+  const leaveLearn = () => {
+    if (modeRef.current !== "learn") return;
+    setSpeed(1);
+    setLibOpen(true);
+  };
   const enterTap = () => {
+    leaveLearn();
     setSourceIndex(0);
     setMode("tap");
+  };
+
+  // ---------- 这首歌的模式（v10 顶栏）----------
+  const goMode = (m: SongMode) => {
+    if (recBusy || m === mode) return;
+    if (mode === "tune") {
+      player.pause();
+      setVocalOn(false);
+    }
+    if (m !== "record") rec.close();
+    if (m === "tune") {
+      // 修音：先选哪一遍（从录音列表点「去修音」会直接带上）
+      player.pause();
+      setTuneTakeId(null);
+      setVocalOn(false);
+    }
+    if (m === "record") setSpeed(1);
+    // 学唱：默认只放人声、0.75 倍，曲库栏收起让地方
+    if (m === "learn") {
+      setSpeed(0.75);
+      setLearnSolo(true);
+      setLibOpen(false);
+    } else if (mode === "learn") {
+      setSpeed(1);
+      setLibOpen(true);
+    }
+    setSourceIndex(0);
+    setMode(m);
+  };
+  /** 录音按钮：唱歌模式下先切到录音模式 */
+  const openRecord = () => {
+    if (mode !== "record") goMode("record");
+    void rec.openPrep();
   };
 
   // ---------- 快捷键（演唱模式） ----------
@@ -622,8 +637,8 @@ export default function App() {
         void togglePlay();
         break;
       case "KeyR":
-        if (source?.kind !== "accompaniment") return;
-        if (rec.phase === "idle") void rec.openPrep();
+        if (source?.kind !== "accompaniment" || mode === "learn" || speed !== 1) return;
+        if (rec.phase === "idle") openRecord();
         else if (rec.phase === "prep") void rec.start();
         break;
       case "BracketLeft":
@@ -665,153 +680,99 @@ export default function App() {
   };
   const onKeyRef = useRef(onKey);
   onKeyRef.current = onKey;
-  // ⌘F 聚焦搜索框
+  // ⌘\ 收起 / 打开曲库栏（⌘F 搜索在曲库栏里）
   useEffect(() => {
-    const onFind = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.code === "KeyF") {
+    const onToggleLib = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.code === "Backslash" || e.key === "\\")) {
         e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
+        setLibOpen((o) => !o);
       }
+      // ⌘F：曲库栏收着时先打开（搜索框在里面）
+      if ((e.metaKey || e.ctrlKey) && (e.code === "KeyF" || e.key.toLowerCase() === "f")) setLibOpen(true);
     };
-    window.addEventListener("keydown", onFind);
-    return () => window.removeEventListener("keydown", onFind);
+    window.addEventListener("keydown", onToggleLib);
+    return () => window.removeEventListener("keydown", onToggleLib);
   }, []);
 
   useEffect(() => {
-    if ((mode !== "sing" && mode !== "tune") || dialogOpen) return;
+    if ((!singLike && mode !== "tune") || dialogOpen) return;
     const handler = (ev: KeyboardEvent) => onKeyRef.current(ev);
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [mode, dialogOpen]);
+  }, [mode, singLike, dialogOpen]);
 
-  // ---------- 进度条拖动 ----------
-  const [scrub, setScrub] = useState<number | null>(null);
-  const shownPosition = scrub ?? player.position;
-  const duration = player.duration;
+  // 窗口回到前台时悄悄重新扫描（文件夹有变化就自动刷新）；录音、打轴中不扫
+  useAutoRescan(scan, !library || recBusy || mode === "tap");
+
+  // ---------- 左栏「地方」 ----------
+  const openSettings = (tab: SettingsTab = "general") => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  };
+  const place: Place = settingsOpen ? "settings" : liveOpen ? "live" : tvOpen ? "tv" : mode === "practice" ? "practice" : "library";
+  const goPlace = (p: Place) => {
+    if (p === "settings") openSettings();
+    else if (p === "live") setLiveOpen(true);
+    else if (p === "tv") setTvOpen(true);
+    else if (p === "practice") {
+      if (mode === "tap" || mode === "tune" || recBusy) return;
+      player.pause();
+      rec.close();
+      leaveLearn();
+      setMode("practice");
+    } else if (mode === "practice") {
+      setMode("sing");
+      setLibOpen(true);
+    } else setLibOpen((o) => !o);
+  };
+  const liveBusy = goLive.phase === "live" || goLive.obs?.streaming ? "推流中" : settings.liveEnabled ? "歌词同步中" : null;
+
+  const artistLine = selected ? [displayArtist(tagsOf(selected), selected.artist), langEraLine(tagsOf(selected))].filter(Boolean).join(" · ") || null : null;
+  const timed = !!lyricsDoc && hasTimedLines(lyricsDoc);
+  const noAcc = !selected?.accompaniments[0];
+  const statusText = (
+    <>
+      {transposing && "正在处理升降调 / 变速（第一次要几秒）…"}
+      {transposeError && <span className="error-text">{transposeError}</span>}
+      {player.load.kind === "loading" && "正在加载…"}
+      {player.load.kind === "error" && <span className="error-text">{player.load.message}</span>}
+      {player.load.kind === "ready" && singLike && settings.outputLatencyMs === 0 && lyricsDoc && (
+        <Btn className="link" onClick={() => openSettings("audio")}>
+          戴 AirPods？校准耳机延迟让歌词更准
+        </Btn>
+      )}
+    </>
+  );
+  const hasStatus = transposing || !!transposeError || player.load.kind === "loading" || player.load.kind === "error" || (player.load.kind === "ready" && singLike && settings.outputLatencyMs === 0 && !!lyricsDoc);
 
   return (
-    <div className={big ? "app big" : mode === "practice" ? "app practice-mode" : "app"}>
-      <aside className="sidebar">
-        <header className="sidebar-head">
-          <div>
-            <h1>曲库</h1>
-            <p className="muted path" title={library?.root}>
-              {library?.root ?? "还没选素材文件夹"}
-            </p>
-          </div>
-          <div className="head-buttons">
-            <Btn className="ghost" onClick={() => void scan()} disabled={scanning}>
-              {scanning ? "扫描中…" : "重新扫描"}
-            </Btn>
-            <Btn
-              className={goLive.phase === "live" || goLive.obs?.streaming ? "ghost live-on streaming" : settings.liveEnabled ? "ghost live-on" : "ghost"}
-              onClick={() => setLiveOpen(true)}
-              title={settings.liveEnabled ? "直播歌词同步中" : "直播（OBS 歌词叠加层）"}
-            >
-              直播
-            </Btn>
-            <Btn
-              className={mode === "practice" ? "ghost active" : "ghost"}
-              onClick={() => {
-                if (mode === "tap" || mode === "tune" || recBusy) return;
-                player.pause();
-                rec.close();
-                setMode("practice");
-              }}
-              title="每日练声：音阶、气息、长音、听音"
-            >
-              练声
-            </Btn>
-            <Btn className="ghost" onClick={() => setSettingsOpen(true)} title="设置">
-              设置
-            </Btn>
-            <Btn className={videoBusy ? "ghost active" : "ghost"} onClick={() => setVideoOpen(true)} title="粘贴 YouTube 链接，下载视频到素材文件夹" disabled={!library}>
-              {videoBusy ?? "下载视频"}
-            </Btn>
-            <Btn className={tvBusy ? "ghost active" : "ghost"} onClick={() => setTvOpen(true)} title="把歌传到电视上的「波点」，像 KTV 一样唱" disabled={!library}>
-              {tvBusy ?? "电视"}
-            </Btn>
-            <Btn className={tagBusy ? "ghost active" : "ghost"} onClick={() => setTagsOpen(true)} title="歌手、语种、年代标签和歌单" disabled={!library}>
-              {tagBusy ?? "标签"}
-            </Btn>
-            <Btn className="ghost" onClick={() => setCheckOpen(true)} title="资料检查：每首歌缺什么、哪些功能用不了，一键补齐" disabled={!library}>
-              资料
-            </Btn>
-          </div>
-        </header>
+    <div className={["app shell", big ? "big" : "", mode === "practice" ? "practice-mode" : ""].filter(Boolean).join(" ")}>
+      <Rail active={place} onGo={goPlace} busy={{ live: liveBusy, tv: tvBusy }} disabled={{ tv: !library }} />
 
-        {scanError && (
-          <div className="notice error">
-            <p>{scanError}</p>
-            <Btn className="ghost" onClick={() => void scan()}>
-              重试
-            </Btn>
-          </div>
-        )}
-
-        {library && library.songs.length === 0 && !scanError && (
-          <p className="notice muted">没有找到歌曲。把「歌名 - 伴奏.wav」这样命名的文件放进文件夹后点重新扫描。</p>
-        )}
-
-        {library && library.songs.length > 3 && (
-          <div className="search">
-            <input
-              ref={searchRef}
-              type="search"
-              placeholder="搜索歌名 / 原唱（⌘F）"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setQuery("");
-                  e.currentTarget.blur();
-                }
-                if (e.key === "Enter" && shownSongs[0]) {
-                  selectSong(shownSongs[0].id);
-                  e.currentTarget.blur();
-                }
-              }}
-            />
-          </div>
-        )}
-        {query && shownSongs.length === 0 && <p className="notice muted">没有找到「{query}」</p>}
-
-        <ul className={mode === "tap" ? "song-list locked" : "song-list"}>
-          {shownSongs.map((song) => (
-            <li key={song.id}>
-              <Btn
-                className={song.id === selectedId ? "song active" : "song"}
-                title={tagsOf(song)?.note || undefined}
-                onClick={() => selectSong(song.id)}
-                disabled={mode === "tap" && song.id !== selectedId}
-              >
-                <span className="song-title">{songName(song)}</span>
-                <span className="song-artist muted">{[displayArtist(tagsOf(song), song.artist) ?? "原唱未知", langEraLine(tagsOf(song))].filter(Boolean).join(" · ")}</span>
-                <SongBadges song={song} />
-              </Btn>
-            </li>
-          ))}
-        </ul>
-
-        {library && library.unassigned.length > 0 && (
-          <details className="unassigned">
-            <summary>未归类（{library.unassigned.length}）</summary>
-            <ul>
-              {library.unassigned.map((f) => (
-                <li key={f.path} className="muted" title={f.path}>
-                  <span className="unassigned-name">{f.fileName}</span>
-                  {/\.(mp4|mov|m4v|mkv)$/i.test(f.fileName) && (
-                    <Btn className="link unassigned-action" onClick={() => openSeparate(f, null)} title="用 Demucs 分离出伴奏和人声，配成一首歌">
-                      做成伴奏
-                    </Btn>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </aside>
+      {/* 收起时不卸载，筛选和搜索留着 */}
+      <LibraryColumn
+        hidden={!libOpen || mode === "practice"}
+        library={library}
+        selectedId={selectedId}
+        onSelect={selectSong}
+        locked={mode === "tap" || mode === "tune" || recBusy}
+        tags={tags}
+        tagsOf={tagsOf}
+        idOf={idOf}
+        scanError={scanError}
+        onRetry={() => void scan()}
+        onYoutube={() => {
+          setVideoTarget(null);
+          setVideoOpen(true);
+        }}
+        videoBusy={videoBusy}
+        onSeparate={openSeparate}
+        onRefresh={() => void scan()}
+        scanning={scanning}
+        onCheck={() => setCheckOpen(true)}
+        onManageTags={() => setTagsOpen(true)}
+        tagBusy={tagBusy}
+      />
 
       <main className="stage">
         {mode === "practice" ? (
@@ -832,25 +793,8 @@ export default function App() {
           </div>
         ) : !selected ? (
           <div className="empty">
-            <p className="muted">从左边选一首歌</p>
+            <p className="muted">{libOpen ? "从左边选一首歌" : "点左边的「曲库」选一首歌"}</p>
           </div>
-        ) : mode === "tune" && tuneTake && takesApi.dir ? (
-          <TunePage
-            key={tuneTake.id}
-            song={selected}
-            take={tuneTake}
-            dir={takesApi.dir}
-            lyricsDoc={lyricsDoc}
-            player={player}
-            compare={vocalOn}
-            onToggleCompare={() => setVocalOn((v) => !v)}
-            onVoice={setTuneVoice}
-            onExit={() => {
-              player.pause();
-              setVocalOn(false);
-              setMode("sing");
-            }}
-          />
         ) : mode === "tap" ? (
           <TapEditor
             key={selected.id}
@@ -859,7 +803,7 @@ export default function App() {
             player={player}
             settings={settings}
             keysDisabled={dialogOpen}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => openSettings("audio")}
             onSaved={(doc) => {
               setLyricsDoc(doc);
               void scan();
@@ -867,354 +811,244 @@ export default function App() {
             onExit={() => setMode("sing")}
           />
         ) : (
-          <section className="lyrics-area">
-            <div className="song-head">
-              <div className="song-head-text">
-                <h2 title={selected.title}>{songName(selected)}</h2>
-                {displayArtist(tagsOf(selected), selected.artist) && <p className="muted" title={tagsOf(selected)?.note || undefined}>原唱：{displayArtist(tagsOf(selected), selected.artist)}</p>}
-                {selected.originals[0] && (
-                  <p className="muted small originals">
-                    原曲视频：
-                    <Btn className="link" onClick={() => void invoke("open_file", { path: selected.originals[0].path })}>
-                      打开
-                    </Btn>
-                    <Btn className="link" onClick={() => void invoke("reveal_file", { path: selected.originals[0].path })}>
-                      在访达中显示
-                    </Btn>
-                    {(selected.vocals.length === 0 || selected.accompaniments.length === 0) && (
-                      <Btn className="link" onClick={() => openSeparate(selected.originals[0], selected.title)} title="用 Demucs 从视频里分离出缺的伴奏 / 人声">
-                        做成伴奏
+          <>
+            <SongHeader
+              title={songName(selected)}
+              subtitle={artistLine}
+              subtitleTip={tagsOf(selected)?.note || undefined}
+              mode={mode as SongMode}
+              onMode={goMode}
+              locked={recBusy}
+              modeBlocked={{
+                record: noAcc ? "这首歌没有伴奏文件" : undefined,
+                tune: noAcc ? "这首歌没有伴奏文件" : undefined,
+              }}
+              menu={{
+                onInfo: () => setInfoSong(selected),
+                onImportLrc: () => importInputRef.current?.click(),
+                onAlign: timed && selected.vocals.length > 0 ? () => void alignAndSave(lyricsDoc!, lyricsDoc!) : null,
+                aligning,
+                onTap: noAcc ? null : enterTap,
+                hasLyrics: !!lyricsDoc,
+                offset: timed ? { label: formatOffset(lyricsDoc!.offsetMs), onChange: changeOffset } : null,
+                original: selected.originals[0]
+                  ? {
+                      onOpen: () => void invoke("open_file", { path: selected.originals[0].path }),
+                      onReveal: () => void invoke("reveal_file", { path: selected.originals[0].path }),
+                      onExtract: selected.externalRecordings.some((f) => /原曲/.test(f.fileName))
+                        ? null
+                        : () =>
+                            void invoke("extract_audio", { video: selected.originals[0].path, title: selected.title })
+                              .then(() => scan())
+                              .catch((e) => setLyricsError(String(e))),
+                      onSeparate: selected.vocals.length === 0 || selected.accompaniments.length === 0 ? () => openSeparate(selected.originals[0], selected.title) : null,
+                    }
+                  : null,
+                onRevealSong: (() => {
+                  const f = selected.accompaniments[0] ?? selected.vocals[0] ?? selected.lyrics ?? selected.originals[0];
+                  return f ? () => void invoke("reveal_file", { path: f.path }) : null;
+                })(),
+              }}
+            />
+            <input ref={importInputRef} type="file" accept=".lrc,.txt" hidden onChange={(e) => void onImportFile(e)} />
+
+            {mode === "tune" ? (
+              tuneTake && takesApi.dir ? (
+                <TunePage
+                  key={tuneTake.id}
+                  song={selected}
+                  take={tuneTake}
+                  dir={takesApi.dir}
+                  lyricsDoc={lyricsDoc}
+                  player={player}
+                  compare={vocalOn}
+                  onToggleCompare={() => setVocalOn((v) => !v)}
+                  onVoice={setTuneVoice}
+                  onExit={() => {
+                    player.pause();
+                    setVocalOn(false);
+                    setTuneTakeId(null);
+                  }}
+                />
+              ) : (
+                <section className="lyrics-area v10">
+                  <TunePicker
+                    takes={takesApi.takes}
+                    onPick={(t) => {
+                      player.pause();
+                      setVocalOn(false);
+                      setTuneTakeId(t.id);
+                    }}
+                    onRecord={() => goMode("record")}
+                  />
+                </section>
+              )
+            ) : mode === "learn" ? (
+              <LearnMode
+                title={selected.title}
+                annotations={selected.originals.map((f) => f.fileName.replace(/\.[^.]+$/, ""))}
+                doc={lyricsDoc}
+                time={heard}
+                loop={player.loop}
+                onPlayLine={(a, b) => {
+                  player.setLoop({ a, b });
+                  seekTo(a);
+                  if (!player.playing) void togglePlay();
+                }}
+                onClearLoop={() => player.setLoop(null)}
+              />
+            ) : (
+              <section className="lyrics-area v10">
+
+                {aligning && <div className="import-confirm muted">正在按人声对齐歌词，第一次要几秒钟…</div>}
+                {alignNotice && !aligning && (
+                  <div className={alignNotice.error ? "import-confirm error-text" : "import-confirm"}>
+                    <span>{alignNotice.text}</span>
+                    {alignNotice.undo && (
+                      <Btn className="ghost" onClick={() => void undoAlign()}>
+                        撤销对齐
                       </Btn>
                     )}
-                    {!selected.externalRecordings.some((f) => /原曲/.test(f.fileName)) && (
-                      <Btn
-                        className="link"
-                        onClick={() =>
-                          void invoke("extract_audio", { video: selected.originals[0].path, title: selected.title })
-                            .then(() => scan())
-                            .catch((e) => setLyricsError(String(e)))
-                        }
-                        title="抽出视频里的音频，之后可以在下面切到「原曲」试听"
-                      >
-                        抽出音频
-                      </Btn>
-                    )}
-                  </p>
-                )}
-              </div>
-              <div className="head-actions">
-                <Btn className="ghost" onClick={() => setInfoSong(selected)} title="歌曲资料：歌名、读音、歌手……；改文件名">
-                  资料
-                </Btn>
-                <Btn className="ghost" onClick={() => setLearnOpen(true)} title="外语学唱：问老师，老师说错了纠正它">
-                  学唱
-                </Btn>
-                <Btn className="ghost" onClick={() => void toggleBig()} title="全屏大字（F）">
-                  {big ? "退出全屏" : "全屏"}
-                </Btn>
-                <Btn
-                  className={settings.showPitch && hasVocal ? "ghost active" : "ghost"}
-                  onClick={() => updateSettings({ showPitch: !settings.showPitch })}
-                  disabled={!hasVocal}
-                  title={hasVocal ? "音高窗口：原唱音高跟着播放滚动，打开录音栏时显示自己唱的" : "需要「歌名 - 人声.wav」原唱人声文件"}
-                >
-                  音高
-                </Btn>
-                {lyricsDoc && hasTimedLines(lyricsDoc) && (
-                  <div className="offset" title="歌词整体偏移，保存在歌词文件里">
-                    <span className="muted small">歌词</span>
-                    <Btn className="ghost tiny" onClick={() => changeOffset(-OFFSET_STEP_MS)} title="推后 50ms">
-                      −
-                    </Btn>
-                    <span className="small offset-value">{formatOffset(lyricsDoc.offsetMs)}</span>
-                    <Btn className="ghost tiny" onClick={() => changeOffset(OFFSET_STEP_MS)} title="提前 50ms">
-                      +
+                    <Btn className="ghost" onClick={() => setAlignNotice(null)}>
+                      知道了
                     </Btn>
                   </div>
                 )}
-                <Btn className="ghost" onClick={() => importInputRef.current?.click()} disabled={aligning}>
-                  导入 LRC
-                </Btn>
-                {lyricsDoc && hasTimedLines(lyricsDoc) && selected.vocals.length > 0 && (
-                  <Btn
-                    className="ghost"
-                    disabled={aligning}
-                    title="按原唱人声自动修正每句歌词的时间"
-                    onClick={() => void alignAndSave(lyricsDoc, lyricsDoc)}
-                  >
-                    {aligning ? "对齐中…" : "智能对齐"}
-                  </Btn>
+                {pendingImport && (
+                  <div className="import-confirm">
+                    <span>导入的歌词有 {pendingImport.lines.filter((l) => l.text !== "").length} 句，替换掉现在的歌词？</span>
+                    <Btn className="ghost" onClick={() => setPendingImport(null)}>
+                      取消
+                    </Btn>
+                    <Btn className="primary" onClick={() => void alignAndSave(pendingImport, pendingImport)}>
+                      替换
+                    </Btn>
+                  </div>
                 )}
-                <Btn className="ghost" onClick={enterTap} disabled={!selected.accompaniments[0]}>
-                  {lyricsDoc ? "编辑歌词" : "打轴"}
-                </Btn>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept=".lrc,.txt"
-                  hidden
-                  onChange={(e) => void onImportFile(e)}
-                />
-              </div>
-            </div>
 
-            {aligning && <div className="import-confirm muted">正在按人声对齐歌词，第一次要几秒钟…</div>}
-            {alignNotice && !aligning && (
-              <div className={alignNotice.error ? "import-confirm error-text" : "import-confirm"}>
-                <span>{alignNotice.text}</span>
-                {alignNotice.undo && (
-                  <Btn className="ghost" onClick={() => void undoAlign()}>
-                    撤销对齐
-                  </Btn>
-                )}
-                <Btn className="ghost" onClick={() => setAlignNotice(null)}>
-                  知道了
-                </Btn>
-              </div>
-            )}
-            {pendingImport && (
-              <div className="import-confirm">
-                <span>
-                  导入的歌词有 {pendingImport.lines.filter((l) => l.text !== "").length} 句，替换掉现在的歌词？
-                </span>
-                <Btn className="ghost" onClick={() => setPendingImport(null)}>
-                  取消
-                </Btn>
-                <Btn className="primary" onClick={() => void alignAndSave(pendingImport, pendingImport)}>
-                  替换
-                </Btn>
-              </div>
-            )}
-
-            <div className="lyrics-body">
-              {lyricsDoc && hasTimedLines(lyricsDoc) ? (
-                <LyricsView doc={lyricsDoc} time={heard} playing={player.playing} onSeek={seekTo} large />
-              ) : (
-                <div className="empty-lyrics">
-                  <p className="muted">{lyricsDoc ? "歌词还没打轴" : "还没有歌词"}</p>
-                  <Btn className="primary" onClick={enterTap} disabled={!selected.accompaniments[0]}>
-                    {lyricsDoc ? "继续打轴" : "粘贴歌词，开始打轴"}
-                  </Btn>
+                <div className="lyrics-body">
+                  <div className="lyrics-col">
+                    <CornerToggles
+                      big={big}
+                      onBig={() => void toggleBig()}
+                      pitchOn={settings.showPitch && hasVocal}
+                      onPitch={hasVocal ? () => updateSettings({ showPitch: !settings.showPitch }) : null}
+                      pitchTip={hasVocal ? "音高窗口：原唱音高跟着播放滚动，录音时显示自己唱的" : "音高窗口要有「歌名 - 人声.wav」原唱人声文件"}
+                    />
+                    {timed ? (
+                      <LyricsView doc={lyricsDoc!} time={heard} playing={player.playing} onSeek={seekTo} large />
+                    ) : (
+                      <div className="empty-lyrics">
+                        <p className="muted">{lyricsDoc ? "歌词还没打轴" : "还没有歌词"}</p>
+                        <Btn className="primary" onClick={enterTap} disabled={noAcc}>
+                          {lyricsDoc ? "继续打轴" : "粘贴歌词，开始打轴"}
+                        </Btn>
+                      </div>
+                    )}
+                  </div>
+                  {mode === "record" && source?.kind === "accompaniment" && (
+                    <TakesPanel
+                      title={selected.title}
+                      takes={takesApi}
+                      compare={vocalOn}
+                      onToggleCompare={() => setVocalOn((v) => !v)}
+                      canCompare={hasVocal}
+                      voiceVolume={settings.myVoiceVolume}
+                      onVoiceVolume={(v) => updateSettings({ myVoiceVolume: v })}
+                      onSeek={seekTo}
+                      disabled={recBusy}
+                      onComp={() => setCompOpen(true)}
+                      onOpenTune={(t) => {
+                        rec.close();
+                        player.pause();
+                        setVocalOn(false);
+                        setTuneTakeId(t.id);
+                        setMode("tune");
+                      }}
+                    />
+                  )}
                 </div>
-              )}
-              {source?.kind === "accompaniment" && (takesApi.takes.length > 0 || rec.phase !== "idle") && (
-                <TakesPanel
-                  title={selected.title}
-                  takes={takesApi}
-                  compare={vocalOn}
-                  onToggleCompare={() => setVocalOn((v) => !v)}
-                  canCompare={hasVocal}
-                  voiceVolume={settings.myVoiceVolume}
-                  onVoiceVolume={(v) => updateSettings({ myVoiceVolume: v })}
-                  onSeek={seekTo}
-                  disabled={recBusy}
-                  onComp={() => setCompOpen(true)}
-                  onOpenTune={(t) => {
-                    rec.close();
-                    player.pause();
-                    setVocalOn(false);
-                    setTuneTakeId(t.id);
-                    setMode("tune");
-                  }}
-                />
-              )}
-            </div>
-            {pitchVocal && (
-              <SingPitch
-                refPitch={refPitch?.path === pitchVocal ? refPitch.ref : null}
-                transpose={transpose}
-                status={pitchStatus}
-                getHeard={getHeard}
-                live={liveInput}
-                big={big}
-              />
+                {pitchVocal && (
+                  <SingPitch
+                    refPitch={refPitch?.path === pitchVocal ? refPitch.ref : null}
+                    transpose={transpose}
+                    status={pitchStatus}
+                    getHeard={getHeard}
+                    live={liveInput}
+                    big={big}
+                  />
+                )}
+                {lyricsError && <p className="error-text small center">{lyricsError}</p>}
+              </section>
             )}
-            {lyricsError && <p className="error-text small center">{lyricsError}</p>}
-          </section>
+          </>
         )}
 
-        {selected && mode === "sing" && rec.phase !== "idle" && (
+        {selected && mode === "record" && rec.phase !== "idle" && (
           <RecordBar
             rec={rec}
-            position={player.position}
-            recordStart={recordStartRef.current}
             canPunch={!!takesApi.selected && !!player.loop}
             loopLabel={player.loop ? `${formatTime(player.loop.a)}–${formatTime(player.loop.b)}` : null}
           />
         )}
 
-        {selected && mode !== "practice" && (
-          <footer className="controls">
-            {mode === "sing" && sources.length > 1 && (
-              <div className="segmented" role="tablist" aria-label="播放音源">
-                {sources.map((s, i) => (
-                  <Btn
-                    key={s.file.path}
-                    role="tab"
-                    aria-selected={s === source}
-                    className={s === source ? "seg active" : "seg"}
-                    onClick={() => setSourceIndex(i)}
-                    title={s.file.fileName}
-                  >
-                    {s.label}
-                  </Btn>
-                ))}
-              </div>
-            )}
-
-            <div className="transport">
-              <Btn className="icon" onClick={() => skip(-SKIP_SECONDS)} disabled={!ready} title="后退 5 秒（←）">
-                −5
-              </Btn>
-              <Btn
-                className="icon play"
-                onClick={() => void togglePlay()}
-                disabled={!ready}
-                title="播放 / 暂停（空格）"
-                aria-label={player.playing ? "暂停" : "播放"}
-              >
-                <PlayIcon playing={player.playing} />
-              </Btn>
-              <Btn className="icon" onClick={() => skip(SKIP_SECONDS)} disabled={!ready} title="前进 5 秒（→）">
-                +5
-              </Btn>
-              {mode === "sing" && source?.kind === "accompaniment" && (
-                <Btn
-                  className={rec.phase !== "idle" ? "rec-btn on" : "rec-btn"}
-                  onClick={() => (rec.phase === "idle" ? void rec.openPrep() : recBusy ? rec.stop() : rec.close())}
-                  disabled={!ready || speed !== 1}
-                  title={speed !== 1 ? "变速播放时不能录音，先调回 1x" : "录音（R）"}
-                >
-                  ● 录音
-                </Btn>
-              )}
-            </div>
-
-            <div className="timeline">
-              <span className="time">{formatTime(shownPosition)}</span>
-              <div className="track-wrap">
-                {player.loop && duration > 0 && (
-                  <div
-                    className="loop-region"
-                    style={{ left: `${(player.loop.a / duration) * 100}%`, width: `${((player.loop.b - player.loop.a) / duration) * 100}%` }}
-                    title={`A-B 循环 ${formatTime(player.loop.a)}–${formatTime(player.loop.b)}`}
-                  />
-                )}
-                <input
-                  type="range"
-                  min={0}
-                  max={duration || 1}
-                  step={0.1}
-                  value={Math.min(shownPosition, duration || 1)}
-                  disabled={!ready || recBusy}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setScrub(Number(e.target.value))}
-                  onPointerUp={(e: ReactPointerEvent<HTMLInputElement>) => {
-                    seekTo(Number(e.currentTarget.value));
-                    setScrub(null);
-                  }}
-                  aria-label="播放进度"
-                />
-              </div>
-              <span className="time">{formatTime(duration)}</span>
-              {mode === "sing" && (
-                <div className="ab" aria-label="A-B 循环">
-                  <Btn className="ghost tiny" onClick={() => setLoopPoint("a")} disabled={!ready || recBusy} title="把当前位置设为 A（[）">
-                    A
-                  </Btn>
-                  <Btn className="ghost tiny" onClick={() => setLoopPoint("b")} disabled={!ready || recBusy} title="把当前位置设为 B（]）">
-                    B
-                  </Btn>
-                  {player.loop && (
-                    <Btn className="ghost tiny" onClick={() => player.setLoop(null)} disabled={recBusy} title="取消循环（\）">
-                      ×
-                    </Btn>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {mode === "sing" && source?.kind === "accompaniment" && (
-              <div className="mixer">
-                <label className="mix">
-                  <span className="muted small">伴奏</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={settings.accompanimentVolume}
-                    onChange={(e) => updateSettings({ accompanimentVolume: Number(e.target.value) })}
-                    aria-label="伴奏音量"
-                  />
-                </label>
-                <div className="mix transpose" title="升降调（不变速），伴奏和引导人声一起移">
-                  <span className="muted small">升降调</span>
-                  <Btn className="ghost tiny" onClick={() => setSongTranspose(Math.max(-6, transpose - 1))} disabled={transpose <= -6 || recBusy}>
-                    −
-                  </Btn>
-                  <span className="small offset-value">{transpose > 0 ? `+${transpose}` : transpose}</span>
-                  <Btn className="ghost tiny" onClick={() => setSongTranspose(Math.min(6, transpose + 1))} disabled={transpose >= 6 || recBusy}>
-                    +
-                  </Btn>
-                </div>
-                <label className="mix" title="变速不变调：练快歌时放慢，音调不变">
-                  <span className="muted small">速度</span>
-                  <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} disabled={recBusy || rec.phase !== "idle"}>
-                    {[0.5, 0.6, 0.75, 0.9, 1, 1.1, 1.25, 1.5].map((v) => (
-                      <option key={v} value={v}>
-                        {v}x
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {playTake ? (
-                  <span className="muted small">回放「{playTake.name}」· V 切换听原唱对比</span>
-                ) : (
-                <div className="mix">
-                  <Btn
-                    className={vocalOn ? "toggle on" : "toggle"}
-                    onClick={() => setVocalOn((v) => !v)}
-                    disabled={!hasVocal}
-                    title={hasVocal ? "引导人声开 / 关（V）" : "这首歌没有人声文件"}
-                  >
-                    引导人声 {vocalOn ? "开" : "关"}
-                  </Btn>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={settings.vocalGuideVolume}
-                    disabled={!hasVocal}
-                    onChange={(e) => {
-                      updateSettings({ vocalGuideVolume: Number(e.target.value) });
-                      setVocalOn(true);
-                    }}
-                    aria-label="引导人声音量"
-                  />
-                </div>
-                )}
-              </div>
-            )}
-
-            <p className="status muted">
-              {transposing && "正在处理升降调 / 变速（第一次要几秒）…"}
-              {transposeError && <span className="error-text">{transposeError}</span>}
-              {player.load.kind === "loading" && "正在加载…"}
-              {player.load.kind === "error" && <span className="error-text">{player.load.message}</span>}
-              {player.load.kind === "ready" &&
-                source &&
-                `${source.label}${transpose ? `（${transpose > 0 ? "升" : "降"} ${Math.abs(transpose)} 个半音）` : ""}${playSpeed !== 1 ? `（${playSpeed}x）` : ""}：${source.file.fileName}${playTake ? ` + 录音「${playTake.name}」` : ""}`}
-              {player.load.kind === "ready" && mode === "sing" && settings.outputLatencyMs === 0 && lyricsDoc && (
-                <>
-                  {" · "}
-                  <Btn className="link" onClick={() => setSettingsOpen(true)}>
-                    戴 AirPods？校准耳机延迟让歌词更准
-                  </Btn>
-                </>
-              )}
-            </p>
-          </footer>
+        {selected && mode !== "practice" && !needLibrary && (
+          <TransportBar
+            ready={ready}
+            playing={player.playing}
+            onPlay={() => void togglePlay()}
+            onSkip={skip}
+            rec={
+              (mode === "sing" || mode === "record") && source?.kind === "accompaniment"
+                ? {
+                    on: rec.phase !== "idle",
+                    disabled: !ready || speed !== 1,
+                    title: speed !== 1 ? "变速播放时不能录音，先调回 1x" : "录音（R）",
+                    onClick: () => (rec.phase === "idle" ? openRecord() : recBusy ? rec.stop() : rec.close()),
+                  }
+                : null
+            }
+            position={player.position}
+            duration={player.duration}
+            seekDisabled={!ready || recBusy}
+            onSeek={seekTo}
+            loop={player.loop}
+            ab={singLike ? { onA: () => setLoopPoint("a"), onB: () => setLoopPoint("b"), onClear: () => player.setLoop(null), disabled: !ready || recBusy } : null}
+            vocal={
+              singLike && source?.kind === "accompaniment"
+                ? mode === "learn"
+                  ? { on: solo, disabled: !selected.vocals[0], label: "只放人声", title: selected.vocals[0] ? "只放原唱人声（伴奏静音）" : "这首歌没有人声文件", onToggle: () => setLearnSolo((v) => !v) }
+                  : playTake
+                    ? { on: vocalOn, disabled: !hasVocal, label: vocalOn ? "听原唱" : "听我的", title: `回放「${playTake.name}」· V 在我的声音和原唱之间切换`, onToggle: () => setVocalOn((v) => !v) }
+                    : { on: vocalOn, disabled: !hasVocal, label: "人声 带唱", title: hasVocal ? "引导人声开 / 关（V）" : "这首歌没有人声文件", onToggle: () => setVocalOn((v) => !v) }
+                : null
+            }
+            speed={singLike && source?.kind === "accompaniment" ? { value: speed, disabled: recBusy || rec.phase !== "idle", onChange: setSpeed } : null}
+            sound={
+              singLike
+                ? {
+                    sources: sources.map((s) => ({ label: s.label, title: s.file.fileName })),
+                    sourceIndex: source ? sources.indexOf(source) : 0,
+                    onSource: (i) => !recBusy && setSourceIndex(i),
+                    acc: source?.kind === "accompaniment" ? { value: settings.accompanimentVolume, onChange: (v) => updateSettings({ accompanimentVolume: v }), disabled: solo } : null,
+                    vocal:
+                      source?.kind === "accompaniment" && !playTake
+                        ? {
+                            value: settings.vocalGuideVolume,
+                            disabled: !hasVocal || solo,
+                            title: "引导人声音量",
+                            onChange: (v) => {
+                              updateSettings({ vocalGuideVolume: v });
+                              setVocalOn(true);
+                            },
+                          }
+                        : null,
+                    transpose: source?.kind === "accompaniment" ? { value: transpose, onChange: setSongTranspose, disabled: recBusy } : null,
+                  }
+                : null
+            }
+            status={hasStatus ? statusText : undefined}
+          />
         )}
       </main>
 
@@ -1222,6 +1056,7 @@ export default function App() {
       {liveOpen && <LivePanel settings={settings} onChange={updateSettings} onClose={() => setLiveOpen(false)} live={goLive} />}
       {settingsOpen && (
         <SettingsDialog
+          initialTab={settingsTab}
           settings={settings}
           onChange={updateSettings}
           onClose={() => setSettingsOpen(false)}
@@ -1234,16 +1069,8 @@ export default function App() {
         />
       )}
       <VideoDialog open={videoOpen} onClose={() => setVideoOpen(false)} libraryRoot={library?.root ?? null} onDownloaded={onVideoDownloaded} onBusy={setVideoBusy} target={videoTarget} onSeparated={onSeparated} onOpenSong={openSongByName} />
-      {learnOpen && selected && (
-        <LearnDialog
-          title={selected.title}
-          shownTitle={songName(selected)}
-          annotations={selected.originals.map((f) => f.fileName.replace(/\.[^.]+$/, ""))}
-          onClose={() => setLearnOpen(false)}
-        />
-      )}
       <TvDialog open={tvOpen} onClose={() => setTvOpen(false)} songs={library?.songs ?? []} onBusy={setTvBusy} />
-      <TagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} songs={library?.songs ?? []} onBusy={setTagBusy} onOpenSettings={() => setSettingsOpen(true)} onTagsChanged={setTags} onLibraryChanged={() => void invoke<Library>("scan_library").then(setLibrary)} />
+      <TagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} songs={library?.songs ?? []} onBusy={setTagBusy} onOpenSettings={() => openSettings("ai")} onTagsChanged={setTags} onLibraryChanged={() => void invoke<Library>("scan_library").then(setLibrary)} />
       <CheckDialog
         open={checkOpen}
         songs={library?.songs ?? []}
@@ -1251,6 +1078,7 @@ export default function App() {
         onEdit={setInfoSong}
         onGoTo={(song, m) => {
           setCheckOpen(false);
+          leaveLearn();
           setSelectedId(song.id);
           setSourceIndex(0);
           setMode(m);

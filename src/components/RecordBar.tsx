@@ -1,12 +1,10 @@
+import { useEffect, useState } from "react";
 import type { RecordingApi } from "../takes/useRecording";
 import { formatTime } from "../utils/time";
 import { Btn } from "./Btn";
 
 interface Props {
   rec: RecordingApi;
-  /** 当前播放位置（录音中显示已录时长） */
-  position: number;
-  recordStart: number;
   canPunch: boolean;
   loopLabel: string | null;
 }
@@ -23,8 +21,18 @@ function Meter({ level }: { level: number }) {
   );
 }
 
+/** 真正录了多久（按墙上时间算；中途跳转、暂停伴奏都不影响） */
+function Elapsed({ since }: { since: number | null }) {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(performance.now()), 250);
+    return () => window.clearInterval(id);
+  }, []);
+  return <>{formatTime(since === null ? 0 : Math.max(0, (now - since) / 1000))}</>;
+}
+
 /** 录音准备栏 + 录音中状态（PRD 4.4） */
-export function RecordBar({ rec, position, recordStart, canPunch, loopLabel }: Props) {
+export function RecordBar({ rec, canPunch, loopLabel }: Props) {
   const busy = rec.phase === "noise" || rec.phase === "countdown" || rec.phase === "recording" || rec.phase === "saving" || rec.phase === "calibrating";
 
   if (rec.phase === "noise") {
@@ -50,7 +58,7 @@ export function RecordBar({ rec, position, recordStart, canPunch, loopLabel }: P
   if (rec.phase === "recording") {
     return (
       <div className="record-bar live recording">
-        <span className="rec-dot blink" /> 录音中 {formatTime(Math.max(0, position - recordStart))}
+        <span className="rec-dot blink" /> 录音中 <Elapsed since={rec.recordingSince} />
         <Meter level={rec.level} />
         <Btn className="primary" onClick={rec.stop}>
           停止（空格）

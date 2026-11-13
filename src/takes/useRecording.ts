@@ -63,6 +63,8 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
   const [route, setRoute] = useState<AudioRoute | null>(null);
   const [range, setRange] = useState<RecRange>("whole");
   const [countdown, setCountdown] = useState(0);
+  /** 开始录的时刻（performance.now）；录音栏按它显示真正录了多久，跳转、暂停都不影响 */
+  const [recordingSince, setRecordingSince] = useState<number | null>(null);
   const [level, setLevel] = useState(0);
   const [inputWarning, setInputWarning] = useState<string | null>(null);
   const [monitor, setMonitorState] = useState(false);
@@ -266,6 +268,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
     // 等停止：手动停、播到结尾、补录播过 B 之后 0.5 秒；
     // 暂停了伴奏又忘了停：从开始录算起超过 歌长 + 30 秒自动停（照常保存）
     const recStartedAt = performance.now();
+    setRecordingSince(recStartedAt);
     let autoStopped = false;
     await new Promise<void>((resolve) => {
       const timer = window.setInterval(() => {
@@ -281,6 +284,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       stopRef.current = finish;
     });
     stopRef.current = null;
+    setRecordingSince(null);
     unlisten();
     const stopPos = reachedEnd ? player.duration : Math.min(player.getPosition(), player.duration);
     player.pause();
@@ -434,6 +438,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
 
   return {
     phase,
+    recordingSince,
     error,
     notice,
     inputs,

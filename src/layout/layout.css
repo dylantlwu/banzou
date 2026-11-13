@@ -1,0 +1,886 @@
+/* v10 电脑端布局：最左「地方」、曲库栏、歌曲区。颜色和按钮沿用 App.css 的变量，只改摆放 */
+
+/* 曲库栏能收起，用 flex 排：左栏、曲库栏（可没有）、歌曲区占满 */
+.app.shell {
+  display: flex;
+}
+
+.app.shell > .stage {
+  flex: 1;
+  min-width: 0;
+}
+
+.app.shell.big .rail,
+.app.shell.big .lib,
+.app.shell.big .song-top,
+.app.shell.big .takes,
+.app.shell.big .tbar-knobs,
+.app.shell.big .tbar-status {
+  display: none;
+}
+
+/* ---------- 最左一条：地方 ---------- */
+
+.rail {
+  width: 64px;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0 12px;
+  gap: 4px;
+  min-height: 0;
+}
+
+.rail-mark {
+  display: flex;
+  gap: 3px;
+  margin: 4px 0 14px;
+}
+
+.rail-mark i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+}
+
+.rail-mark i:first-child {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.place {
+  position: relative;
+  width: 52px;
+  padding: 7px 0 5px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.place svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.place:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.place.on,
+.place.on:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.place-dot {
+  position: absolute;
+  top: 5px;
+  right: 11px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.rail-grow {
+  flex: 1;
+}
+
+/* ---------- 弹出菜单 ---------- */
+
+.pop-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.pop-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 8;
+  min-width: 210px;
+  max-width: 320px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.16);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  text-align: left;
+}
+
+.pop-menu.right {
+  right: 0;
+}
+
+.pop-menu.left {
+  left: 0;
+}
+
+.pop-menu.up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pop-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.pop-head {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 6px 10px 2px;
+}
+
+.pop-line {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 5px 4px;
+  width: calc(100% - 8px);
+}
+
+.pop-note {
+  padding: 4px 10px 6px;
+}
+
+.pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  min-width: 0;
+}
+
+.pop-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.pop-check {
+  width: 12px;
+  color: var(--accent);
+}
+
+.pop-count {
+  margin-left: auto;
+}
+
+.offset-row > span:first-child {
+  flex: 1;
+}
+
+/* ---------- 曲库栏 ---------- */
+
+.lib {
+  width: clamp(220px, 22vw, 280px);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lib[hidden] {
+  display: none;
+}
+
+.lib-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 14px 10px;
+}
+
+.lib-head h1 {
+  font-size: 17px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.lib-busy {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plus {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+}
+
+.plus:hover:not(:disabled),
+.plus.open {
+  background: var(--hover);
+}
+
+.lib-search {
+  padding: 0 14px;
+}
+
+.lib-search input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.lib-search input:focus {
+  border-color: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px 8px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chip:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.chip.on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.lib-songs {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.lib-song {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.lib-song:hover {
+  background: var(--hover);
+}
+
+.lib-song.on {
+  background: var(--accent-soft);
+}
+
+.lib-songs.locked .lib-song:disabled {
+  opacity: 0.35;
+}
+
+.lib-song-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lib-song-title,
+.lib-song-text small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lib-song-title {
+  font-weight: 500;
+}
+
+.lib-song-text small {
+  font-size: 12px;
+}
+
+.beads {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.beads i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 0.85;
+}
+
+.beads i.no {
+  background: none;
+  border: 1.2px solid var(--muted);
+  opacity: 0.6;
+}
+
+.lib-song.on .beads i:not(.no) {
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.lib-foot {
+  border-top: 1px solid var(--line);
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lib-foot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-quiet {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.link-quiet:hover,
+.link-quiet.open {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.todo-menu {
+  width: 280px;
+}
+
+/* ---------- 歌曲区顶栏 ---------- */
+
+.song-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.song-top-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.song-top-title h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.song-top-title small {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mode-seg {
+  padding: 3px;
+  border-radius: 9px;
+}
+
+.mode-seg .seg {
+  padding: 5px 16px;
+  font-size: 13px;
+  border-radius: 7px;
+}
+
+.mode-seg .seg.active {
+  font-weight: 600;
+}
+
+.iconbtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.iconbtn svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.iconbtn:hover:not(:disabled),
+.iconbtn.open {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.iconbtn.soft {
+  border-color: transparent;
+  background: var(--hover);
+  opacity: 0.7;
+}
+
+.iconbtn.soft:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.iconbtn.soft.on {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.song-menu {
+  width: 240px;
+}
+
+/* 歌词区（v10）：顶栏下面、播放栏上面 */
+.lyrics-area.v10 {
+  position: relative;
+  padding: 12px 28px 8px;
+}
+
+/* 歌词那一栏：右上角放「看的开关」，不压到右边的录音列表 */
+.lyrics-body > .lyrics-col {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.lyrics-col > .lyrics-wrap,
+.lyrics-col > .empty-lyrics {
+  flex: 1;
+  min-height: 0;
+}
+
+.corner {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+}
+
+.mode-hint {
+  margin: auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+/* 修音模式：先选哪一遍 */
+.tune-pick {
+  margin: 24px auto;
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tune-pick ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tune-pick li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.tune-pick li > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- 播放栏 ---------- */
+
+.tbar {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 12px 20px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tbar-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.tbar-transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tbar-transport .rec-btn {
+  margin-left: 6px;
+}
+
+.tbar-timeline {
+  max-width: none;
+}
+
+.ab-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ab-dot:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.ab-dot.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tbar-knobs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.pill:hover:not(:disabled),
+.pill.open {
+  background: var(--hover);
+}
+
+.pill.soft {
+  color: var(--muted);
+}
+
+.pill.on,
+.pill.on:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.pill-select {
+  padding: 0;
+  display: inline-flex;
+}
+
+.pill-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 10px;
+  cursor: pointer;
+  outline: none;
+}
+
+.pill-select select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sound-menu {
+  width: 250px;
+  gap: 4px;
+  padding: 10px;
+}
+
+.sound-sources {
+  margin-bottom: 4px;
+  align-self: flex-start;
+}
+
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.sound-row > span:first-child {
+  width: 44px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sound-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.sound-step {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sound-step .offset-value {
+  min-width: 32px;
+}
+
+.tbar-status {
+  text-align: center;
+  min-height: 0;
+}
+
+/* ---------- 学唱模式 ---------- */
+
+.learn-mode {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) minmax(260px, 320px);
+  min-height: 0;
+}
+
+.learn-lines {
+  scrollbar-width: thin;
+  border-right: 1px solid var(--line);
+  padding: 10px 10px 16px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+
+.learn-sec {
+  font-size: 11px;
+  margin: 10px 6px 4px;
+}
+
+.learn-line {
+  display: flex;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.learn-line span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.learn-line:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.learn-line.now {
+  color: var(--accent);
+}
+
+.learn-line.on {
+  background: var(--accent-soft);
+}
+
+.learn-card {
+  padding: 26px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.learn-orig {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  margin-top: 8px;
+}
+
+.learn-act {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.big-btn {
+  border-radius: 999px;
+  padding: 10px 24px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.learn-mode-notes {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.learn-mode .teacher {
+  min-width: 0;
+}
+
+/* ---------- 设置分页 ---------- */
+
+.dialog.settings-tabs {
+  width: min(760px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 48px));
+  max-height: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+.settings-nav {
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  padding: 18px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.settings-nav h2 {
+  padding: 0 8px 12px;
+}
+
+.settings-tab {
+  padding: 7px 10px;
+  border-radius: 7px;
+  color: var(--muted);
+  text-align: left;
+}
+
+.settings-tab:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.settings-tab.on,
+.settings-tab.on:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-pane {
+  padding: 22px 26px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.settings-pane > h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* 分页标题已经写了，组件自己的小标题不再重复 */
+.settings-pane .ai-settings > label:first-child,
+.settings-pane .net-settings > label:first-child {
+  display: none;
+}
+
+.settings-pane .dialog-actions {
+  margin-top: auto;
+}

@@ -10,7 +10,19 @@ import { NetworkSettings } from "../net/NetworkSettings";
 import { AiSettings } from "./AiSettings";
 import { Btn } from "./Btn";
 
+/** 设置分页（v10）：以后加东西只多一页 */
+export type SettingsTab = "general" | "audio" | "ai" | "network" | "about";
+const TABS: [SettingsTab, string][] = [
+  ["general", "通用"],
+  ["audio", "耳机与录音"],
+  ["ai", "AI 老师"],
+  ["network", "网络"],
+  ["about", "关于"],
+];
+
 interface Props {
+  /** 打开时先显示哪一页 */
+  initialTab?: SettingsTab;
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
   onClose: () => void;
@@ -19,8 +31,9 @@ interface Props {
   onUpdateFound: (update: UpdateInfo) => void;
 }
 
-export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onChooseLibrary, onUpdateFound }: Props) {
+export function SettingsDialog({ initialTab = "general", settings, onChange, onClose, libraryRoot, onChooseLibrary, onUpdateFound }: Props) {
   const [calibrating, setCalibrating] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [version, setVersion] = useState("");
   const [checkState, setCheckState] = useState<{ busy: boolean; text: string; error?: boolean }>({ busy: false, text: "" });
   useEffect(() => {
@@ -48,9 +61,17 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !calibrating && onClose()}>
-      <div className="dialog settings-dialog" role="dialog" aria-label="设置">
-        <h2>设置</h2>
-
+      <div className="dialog settings-dialog settings-tabs" role="dialog" aria-label="设置">
+        <nav className="settings-nav" aria-label="设置分页">
+          <h2>设置</h2>
+          {TABS.map(([id, label]) => (
+            <Btn key={id} className={tab === id ? "settings-tab on" : "settings-tab"} onClick={() => !calibrating && setTab(id)} aria-current={tab === id ? "page" : undefined}>
+              {label}
+            </Btn>
+          ))}
+        </nav>
+        <div className="settings-pane">
+        <h3>{TABS.find(([id]) => id === tab)![1]}</h3>
         {calibrating ? (
           <Calibration
             onDone={(ms) => {
@@ -61,6 +82,7 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
           />
         ) : (
           <>
+            {tab === "general" && (
             <div className="field">
               <label>素材文件夹</label>
               <div className="field-row">
@@ -71,8 +93,12 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
                   换一个…
                 </Btn>
               </div>
+              <p className="muted small">伴奏、人声、歌词放在这里；录音、修音和导出存在里面的「录音」子文件夹。文件夹有变化会自动刷新。</p>
             </div>
+            )}
 
+            {tab === "audio" && (
+            <>
             <div className="field">
               <label htmlFor="latency">耳机延迟</label>
               <div className="field-row">
@@ -111,11 +137,14 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
               </div>
               <p className="muted small">按空格通常比真正开唱晚一点。打出来整体偏晚就调大，偏早就调小。</p>
             </div>
+            </>
+            )}
 
-            <AiSettings />
+            {tab === "ai" && <AiSettings />}
 
-            <NetworkSettings />
+            {tab === "network" && <NetworkSettings />}
 
+            {tab === "about" && (
             <div className="field">
               <label>版本</label>
               <div className="field-row">
@@ -126,6 +155,7 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
                 {checkState.text && <span className={checkState.error ? "small error-text" : "muted small"}>{checkState.text}</span>}
               </div>
             </div>
+            )}
 
             <div className="dialog-actions">
               <Btn className="primary" onClick={onClose}>
@@ -134,6 +164,7 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
             </div>
           </>
         )}
+        </div>
       </div>
     </div>
   );
