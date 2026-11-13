@@ -61,13 +61,15 @@ interface Props {
   /** 素材文件夹（下载到这里） */
   libraryRoot: string | null;
   /** 下载好以后重新扫描曲库；返回这个视频挂到的歌名 */
-  onDownloaded: (path: string) => Promise<string | null>;
+  /** meta：视频的 YouTube 标题和频道名，用来给这首歌自动打标签 */
+  onDownloaded: (path: string, meta?: { title: string; uploader: string | null }) => Promise<string | null>;
   /** 后台任务的进度，给顶部按钮显示（关掉窗口也能看到） */
   onBusy: (text: string | null) => void;
   /** 从曲库里点「做成伴奏」打开时带进来的文件；key 变了就重新开始 */
   target: (SepTarget & { key: number }) | null;
   /** 做好伴奏后重新扫描曲库 */
-  onSeparated: (name: string) => Promise<void>;
+  /** source：做成伴奏的视频文件名，给自动打标签当线索 */
+  onSeparated: (name: string, source?: string) => Promise<void>;
   /** 跳到这首歌 */
   onOpenSong: (name: string) => void;
 }
@@ -189,7 +191,7 @@ export function VideoDialog({ open, onClose, libraryRoot, onDownloaded, onBusy, 
     try {
       const r = await invoke<Separated>("sep_run", { path: sep.path, name: sep.name.trim() });
       setSepResult(r);
-      await onSeparated(r.name).catch(() => undefined);
+      await onSeparated(r.name, sep.fileName).catch(() => undefined);
     } catch (e) {
       const msg = String(e);
       if (msg === "TOOLS_MISSING") void loadTools();
@@ -240,7 +242,7 @@ export function VideoDialog({ open, onClose, libraryRoot, onDownloaded, onBusy, 
     setJob(null);
     try {
       const d = await invoke<Downloaded>("video_download", { url: info.url, quality });
-      const song = await onDownloaded(d.path).catch(() => null);
+      const song = await onDownloaded(d.path, { title: info.title, uploader: info.uploader }).catch(() => null);
       setResult({ ...d, song });
       setInfo(null);
       setUrl("");

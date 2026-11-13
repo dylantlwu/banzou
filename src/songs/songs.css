@@ -1,0 +1,220 @@
+/* 歌曲资料窗口和资料检查（独立文件，换桌面布局时整块挪走） */
+
+.song-info {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.song-info-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.song-info-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.song-info-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.song-info-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 500;
+}
+
+.song-info-row input,
+.song-info-row select,
+.song-info-row textarea,
+.song-info-rename-row input {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  min-width: 0;
+}
+
+.song-info-row textarea {
+  resize: vertical;
+}
+
+.song-info-hint {
+  grid-column: 2;
+}
+
+.by {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.by-user {
+  color: var(--accent);
+}
+
+.song-info-rename summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.song-info-rename p {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+
+.song-info-rename-row {
+  display: flex;
+  gap: 8px;
+}
+
+.song-info-rename-row input {
+  flex: 1;
+}
+
+.song-info-plan ul,
+.check-plan ul {
+  margin: 6px 0 10px;
+  padding-left: 18px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.check-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  gap: 12px;
+}
+
+.check-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.check-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--hover);
+  align-self: flex-start;
+}
+
+.check-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  line-height: 1.5;
+}
+
+.check-banner > span {
+  flex: 1;
+}
+
+.check-plan {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.check-list {
+  flex: 1;
+  min-height: 80px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-song {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.check-song-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.check-song-name {
+  font-weight: 600;
+}
+
+.check-song ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.check-gap {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-blocks {
+  color: var(--error);
+  font-size: 12px;
+}
+
+.check-fixes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+/* 资料检查：异常录音（AbnormalRecordings.tsx） */
+.check-abnormal {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.check-abnormal p {
+  margin: 0 0 6px;
+}
+
+.check-abnormal ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.check-abnormal li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check-abnormal-name {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}

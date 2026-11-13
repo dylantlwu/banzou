@@ -31,6 +31,7 @@ import type { Song } from "../types";
 import { Btn, isTyping } from "./Btn";
 import { LyricsView } from "./LyricsView";
 import { Waveform } from "./Waveform";
+import { songName } from "../songs/meta";
 
 type Phase = "text" | "tap" | "preview";
 type Listen = "vocal" | "accompaniment" | "both";
@@ -310,7 +311,7 @@ export function TapEditor({ song, doc, player, settings, onSaved, onExit, onOpen
           <Btn className="ghost" onClick={requestExit}>
             ← 返回
           </Btn>
-          <h2 className="editor-title">粘贴歌词 · {song.title}</h2>
+          <h2 className="editor-title">粘贴歌词 · {songName(song)}</h2>
         </div>
         <div className="tap-text">
           <p className="muted">把歌词粘贴进来，每行一句，空行会自动去掉。已经打过轴的行，文字不变的话时间会保留。也可以直接粘贴带时间的 LRC，时间会一起带进来。</p>

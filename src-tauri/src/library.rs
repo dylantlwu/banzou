@@ -54,6 +54,10 @@ pub struct Song {
     pub originals: Vec<MediaFile>,
     /// 应用外录的音频（如 iPhone 同时录下人声和外放伴奏的 m4a）
     pub external_recordings: Vec<MediaFile>,
+    /// 稳定编号（资料表里的 id；没有资料表就是 tv::song_id(歌名)），扫描文件夹时填
+    pub song_id: String,
+    /// 资料表 `<歌名>.song.json` 的内容（没有或读不懂是 None）
+    pub meta: Option<crate::songmeta::SongMeta>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,6 +246,8 @@ pub fn build_library(root: &Path, file_names: &[String]) -> Library {
                     lyrics: None,
                     originals: vec![],
                     external_recordings: vec![],
+                    song_id: String::new(),
+                    meta: None,
                 });
                 match kind {
                     TrackKind::Accompaniment => song.accompaniments.push(file),
@@ -313,7 +319,12 @@ pub fn scan_dir(root: &Path) -> io::Result<Library> {
             }
         }
     }
-    Ok(build_library(root, &names))
+    let mut lib = build_library(root, &names);
+    for song in &mut lib.songs {
+        song.meta = crate::songmeta::read(root, &song.title).ok().flatten();
+        song.song_id = song.meta.as_ref().map(|m| m.id.clone()).unwrap_or_else(|| crate::tv::song_id(&song.title));
+    }
+    Ok(lib)
 }
 
 #[cfg(test)]
