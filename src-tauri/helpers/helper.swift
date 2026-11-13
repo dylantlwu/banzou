@@ -1,4 +1,4 @@
-// 伴奏歌词的系统能力小助手（Swift），作为 Tauri sidecar 打进 app。
+// 波点的系统能力小助手（Swift），作为 Tauri sidecar 打进 app。
 //
 // banzou-helper transcribe <音频文件> [语言，默认 zh_CN]
 //   识别人声分轨里唱的字和每个字的时间，供「智能对齐」使用。

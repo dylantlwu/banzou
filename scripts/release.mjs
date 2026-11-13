@@ -68,7 +68,7 @@ if (publish) {
 // ---- 打包 ----
 if (noBuild) console.log(`用上次打好的包（${version}）…`);
 else {
-  console.log(`打包伴奏歌词 ${version}…`);
+  console.log(`打包波点 ${version}…`);
   // 更新包（.app.tar.gz + 签名）只在发版时打；平时自己编译不需要密钥
   run("npm", ["run", "tauri", "build", "--", "--config", JSON.stringify({ bundle: { createUpdaterArtifacts: true } })], { env });
 }
@@ -106,13 +106,13 @@ console.log(`\n✓ ${out}\n  ${name}.zip  SHA-256 ${sha}\n  ${name}.app.tar.gz\n
 
 // ---- 发布 ----
 if (publish) {
-  const body = `${notes}\n\n---\n\n下载 \`${name}.zip\`，解压后把「伴奏歌词」拖进「应用程序」。第一次打开的步骤见 [README](https://github.com/${REPO}#安装)。已经装了 0.2.0 或更新版本的，会在应用里收到更新提示。\n\nSHA-256 (${name}.zip): \`${sha}\``;
+  const body = `${notes}\n\n---\n\n下载 \`${name}.zip\`，解压后把「波点」拖进「应用程序」（以前装过「伴奏歌词」的，删掉旧的就行，设置和曲库不受影响）。第一次打开的步骤见 [README](https://github.com/${REPO}#安装)。已经装了 0.2.0 或更新版本的，会在应用里收到更新提示。\n\nSHA-256 (${name}.zip): \`${sha}\``;
   const notesFile = path.join(out, "release-notes.md");
   fs.writeFileSync(notesFile, body);
   run("gh", [
     "release", "create", `v${version}`,
     "--repo", REPO,
-    "--title", `伴奏歌词 ${version}`,
+    "--title", `波点 ${version}`,
     "--notes-file", notesFile,
     path.join(out, `${name}.zip`),
     path.join(out, `${name}.app.tar.gz`),

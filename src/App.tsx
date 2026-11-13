@@ -19,6 +19,13 @@ import { useTakes } from "./takes/useTakes";
 import { UpdateCard } from "./components/UpdateCard";
 import { type UpdateInfo, checkForUpdate, shouldAutoCheck } from "./update/updater";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { TagsDialog } from "./components/TagsDialog";
+import { CheckDialog } from "./songs/CheckDialog";
+import { songName } from "./songs/meta";
+import { SongInfoDialog } from "./songs/SongInfoDialog";
+import { type TagStore, displayArtist, langEraLine, loadTags, normalizeStore, songId } from "./tags";
+import { TvDialog } from "./components/TvDialog";
+import { LearnDialog } from "./learn/LearnDialog";
 import { type SepTarget, VideoDialog } from "./components/VideoDialog";
 import { useLiveSync } from "./live/liveSync";
 import { useGoLive } from "./live/useGoLive";
@@ -97,7 +104,13 @@ export default function App() {
     }, 3000);
     return () => window.clearTimeout(id);
   }, []);
-  const dialogOpen = settingsOpen || liveOpen || compOpen;
+  const [tvOpen, setTvOpen] = useState(false);
+  const [tvBusy, setTvBusy] = useState<string | null>(null);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  /** 外语学唱（PRD 4.12）：问老师、老师笔记 */
+  const [learnOpen, setLearnOpen] = useState(false);
+  const [tagBusy, setTagBusy] = useState<string | null>(null);
+  const dialogOpen = settingsOpen || liveOpen || compOpen || tvOpen;
   useEffect(() => {
     loadSettings()
       .then(setSettings)
@@ -143,20 +156,43 @@ export default function App() {
   // 下载视频（PRD 4.10）：窗口关掉时下载在后台继续，按钮上显示进度
   const [videoOpen, setVideoOpen] = useState(false);
   const [videoBusy, setVideoBusy] = useState<string | null>(null);
-  const onVideoDownloaded = useCallback(async (path: string) => {
+  // 下载完 / 做成伴奏后顺手给这首歌联网打标签（歌手、语种、年代、背景，没歌词顺手找）；没填 API key 就不做，出错也不打扰
+  const autoTag = useCallback((title: string, hint: string) => {
+    void (async () => {
+      try {
+        if (!(await invoke<boolean>("ai_key_status"))) return;
+        setTagBusy("打标签中…");
+        const r = await invoke<{ songs: number; lyrics: number }>("ai_tag_songs", { retag: false, titles: [title], hints: hint ? { [title]: hint } : null });
+        setTags(await loadTags());
+        if (r.lyrics > 0) setLibrary(await invoke<Library>("scan_library"));
+      } catch (e) {
+        console.warn("自动打标签没成功", e);
+      } finally {
+        setTagBusy(null);
+      }
+    })();
+  }, []);
+  const onVideoDownloaded = useCallback(async (path: string, meta?: { title: string; uploader: string | null }) => {
     const lib = await invoke<Library>("scan_library");
     setLibrary(lib);
-    return lib.songs.find((s) => s.originals.some((o) => o.path === path))?.title ?? null;
-  }, []);
+    const title = lib.songs.find((s) => s.originals.some((o) => o.path === path))?.title ?? null;
+    if (title) autoTag(title, meta ? [meta.title, meta.uploader].filter(Boolean).join(" · ") : "");
+    return title;
+  }, [autoTag]);
   // 做成伴奏（PRD 4.11）：从曲库里点进来时带上文件
   const [videoTarget, setVideoTarget] = useState<(SepTarget & { key: number }) | null>(null);
   const openSeparate = useCallback((file: { path: string; fileName: string }, song: string | null) => {
     setVideoTarget({ ...file, song, key: Date.now() });
     setVideoOpen(true);
   }, []);
-  const onSeparated = useCallback(async () => {
-    setLibrary(await invoke<Library>("scan_library"));
-  }, []);
+  const onSeparated = useCallback(
+    async (name: string, source?: string) => {
+      setLibrary(await invoke<Library>("scan_library"));
+      // 视频文件名一般就是 YouTube 标题，给 AI 当线索
+      autoTag(name, source?.replace(/\.[^.]+$/, "") ?? "");
+    },
+    [autoTag],
+  );
   const openSongByName = useCallback(
     (name: string) => {
       const key = name.trim().toLowerCase().replace(/\s+/g, " ");
@@ -183,6 +219,50 @@ export default function App() {
     void scan();
   }, [scan]);
 
+  // 歌曲资料（src/songs）：资料检查窗口、单首歌的资料窗口
+  const [checkOpen, setCheckOpen] = useState(false);
+  const [infoSong, setInfoSong] = useState<Song | null>(null);
+  const onSongRenamed = useCallback(
+    async (oldKey: string, newKey: string) => {
+      setInfoSong(null);
+      // 升降调记录按文件名记，跟着改
+      const st = settings.transposeBySong[oldKey];
+      if (st !== undefined) {
+        const map = { ...settings.transposeBySong, [newKey]: st };
+        delete map[oldKey];
+        updateSettings({ transposeBySong: map });
+      }
+      const lib = await invoke<Library>("scan_library");
+      setLibrary(lib);
+      const moved = lib.songs.find((s) => s.title === newKey);
+      if (moved) setSelectedId(moved.id);
+      void loadTags()
+        .then(setTags)
+        .catch(() => {});
+    },
+    [settings.transposeBySong, updateSettings],
+  );
+
+  // 标签（歌手 / 语种 / 年代 / 背景）：主列表用它显示；标签窗口改了会通过 onTagsChanged 传回来
+  const [tags, setTags] = useState<TagStore>(() => normalizeStore(null));
+  useEffect(() => {
+    void loadTags()
+      .then(setTags)
+      .catch(() => {});
+  }, []);
+  const [tagIds, setTagIds] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let stop = false;
+    const songs = library?.songs ?? [];
+    void Promise.all(songs.map(async (s) => [s.id, s.songId || (await songId(s.title))] as const)).then((pairs) => {
+      if (!stop) setTagIds(new Map(pairs));
+    });
+    return () => {
+      stop = true;
+    };
+  }, [library]);
+  const tagsOf = useCallback((song: Song) => tags.songs[tagIds.get(song.id) ?? ""], [tags, tagIds]);
+
   const selected = useMemo(() => library?.songs.find((s) => s.id === selectedId) ?? null, [library, selectedId]);
 
   // ---------- 搜索 ----------
@@ -192,8 +272,8 @@ export default function App() {
     const q = query.trim().toLowerCase();
     if (!library) return [];
     if (!q) return library.songs;
-    return library.songs.filter((s) => s.title.toLowerCase().includes(q) || (s.artist ?? "").toLowerCase().includes(q));
-  }, [library, query]);
+    return library.songs.filter((s) => s.title.toLowerCase().includes(q) || songName(s).toLowerCase().includes(q) || (displayArtist(tagsOf(s), s.artist) ?? "").toLowerCase().includes(q));
+  }, [library, query, tagsOf]);
 
   // ---------- 全屏大字（F） ----------
   const [big, setBig] = useState(false);
@@ -437,7 +517,7 @@ export default function App() {
   useLiveSync({
     settings,
     title: selected?.title ?? null,
-    artist: selected?.artist ?? null,
+    artist: selected ? displayArtist(tagsOf(selected), selected.artist) : null,
     doc: lyricsDoc,
     playing: player.playing,
     rate: player.rate,
@@ -649,6 +729,15 @@ export default function App() {
             <Btn className={videoBusy ? "ghost active" : "ghost"} onClick={() => setVideoOpen(true)} title="粘贴 YouTube 链接，下载视频到素材文件夹" disabled={!library}>
               {videoBusy ?? "下载视频"}
             </Btn>
+            <Btn className={tvBusy ? "ghost active" : "ghost"} onClick={() => setTvOpen(true)} title="把歌传到电视上的「波点」，像 KTV 一样唱" disabled={!library}>
+              {tvBusy ?? "电视"}
+            </Btn>
+            <Btn className={tagBusy ? "ghost active" : "ghost"} onClick={() => setTagsOpen(true)} title="歌手、语种、年代标签和歌单" disabled={!library}>
+              {tagBusy ?? "标签"}
+            </Btn>
+            <Btn className="ghost" onClick={() => setCheckOpen(true)} title="资料检查：每首歌缺什么、哪些功能用不了，一键补齐" disabled={!library}>
+              资料
+            </Btn>
           </div>
         </header>
 
@@ -693,11 +782,12 @@ export default function App() {
             <li key={song.id}>
               <Btn
                 className={song.id === selectedId ? "song active" : "song"}
+                title={tagsOf(song)?.note || undefined}
                 onClick={() => selectSong(song.id)}
                 disabled={mode === "tap" && song.id !== selectedId}
               >
-                <span className="song-title">{song.title}</span>
-                <span className="song-artist muted">{song.artist ?? "原唱未知"}</span>
+                <span className="song-title">{songName(song)}</span>
+                <span className="song-artist muted">{[displayArtist(tagsOf(song), song.artist) ?? "原唱未知", langEraLine(tagsOf(song))].filter(Boolean).join(" · ")}</span>
                 <SongBadges song={song} />
               </Btn>
             </li>
@@ -728,7 +818,7 @@ export default function App() {
           <PracticePage settings={settings} onExit={() => setMode("sing")} />
         ) : needLibrary ? (
           <div className="empty welcome">
-            <h2>欢迎使用伴奏歌词</h2>
+            <h2>欢迎使用波点</h2>
             <p className="muted">先选一个放伴奏和歌词的文件夹。文件按这样命名就会自动配成一首歌：</p>
             <ul className="muted small">
               <li>歌名 - 伴奏.wav（或 mp3 / m4a / flac）</li>
@@ -780,8 +870,8 @@ export default function App() {
           <section className="lyrics-area">
             <div className="song-head">
               <div className="song-head-text">
-                <h2 title={selected.title}>{selected.title}</h2>
-                {selected.artist && <p className="muted">原唱：{selected.artist}</p>}
+                <h2 title={selected.title}>{songName(selected)}</h2>
+                {displayArtist(tagsOf(selected), selected.artist) && <p className="muted" title={tagsOf(selected)?.note || undefined}>原唱：{displayArtist(tagsOf(selected), selected.artist)}</p>}
                 {selected.originals[0] && (
                   <p className="muted small originals">
                     原曲视频：
@@ -813,6 +903,12 @@ export default function App() {
                 )}
               </div>
               <div className="head-actions">
+                <Btn className="ghost" onClick={() => setInfoSong(selected)} title="歌曲资料：歌名、读音、歌手……；改文件名">
+                  资料
+                </Btn>
+                <Btn className="ghost" onClick={() => setLearnOpen(true)} title="外语学唱：问老师，老师说错了纠正它">
+                  学唱
+                </Btn>
                 <Btn className="ghost" onClick={() => void toggleBig()} title="全屏大字（F）">
                   {big ? "退出全屏" : "全屏"}
                 </Btn>
@@ -1138,6 +1234,32 @@ export default function App() {
         />
       )}
       <VideoDialog open={videoOpen} onClose={() => setVideoOpen(false)} libraryRoot={library?.root ?? null} onDownloaded={onVideoDownloaded} onBusy={setVideoBusy} target={videoTarget} onSeparated={onSeparated} onOpenSong={openSongByName} />
+      {learnOpen && selected && (
+        <LearnDialog
+          title={selected.title}
+          shownTitle={songName(selected)}
+          annotations={selected.originals.map((f) => f.fileName.replace(/\.[^.]+$/, ""))}
+          onClose={() => setLearnOpen(false)}
+        />
+      )}
+      <TvDialog open={tvOpen} onClose={() => setTvOpen(false)} songs={library?.songs ?? []} onBusy={setTvBusy} />
+      <TagsDialog open={tagsOpen} onClose={() => setTagsOpen(false)} songs={library?.songs ?? []} onBusy={setTagBusy} onOpenSettings={() => setSettingsOpen(true)} onTagsChanged={setTags} onLibraryChanged={() => void invoke<Library>("scan_library").then(setLibrary)} />
+      <CheckDialog
+        open={checkOpen}
+        songs={library?.songs ?? []}
+        onClose={() => setCheckOpen(false)}
+        onEdit={setInfoSong}
+        onGoTo={(song, m) => {
+          setCheckOpen(false);
+          setSelectedId(song.id);
+          setSourceIndex(0);
+          setMode(m);
+        }}
+        onSeparate={(f, key) => openSeparate(f, key)}
+        onOpenVideo={() => setVideoOpen(true)}
+        onChanged={() => void scan().then(() => loadTags().then(setTags).catch(() => {}))}
+      />
+      <SongInfoDialog song={infoSong} onClose={() => setInfoSong(null)} onSaved={() => void scan().then(() => loadTags().then(setTags).catch(() => {}))} onRenamed={onSongRenamed} />
       {update && <UpdateCard key={update.version} update={update} onClose={() => setUpdate(null)} />}
     </div>
   );

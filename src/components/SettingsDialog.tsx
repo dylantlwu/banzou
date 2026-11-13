@@ -6,6 +6,8 @@ import {
 } from "../audio/calibration";
 import type { Settings } from "../settings";
 import { type UpdateInfo, checkForUpdate, currentVersion, describeUpdateError } from "../update/updater";
+import { NetworkSettings } from "../net/NetworkSettings";
+import { AiSettings } from "./AiSettings";
 import { Btn } from "./Btn";
 
 interface Props {
@@ -46,7 +48,7 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
 
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !calibrating && onClose()}>
-      <div className="dialog" role="dialog" aria-label="设置">
+      <div className="dialog settings-dialog" role="dialog" aria-label="设置">
         <h2>设置</h2>
 
         {calibrating ? (
@@ -110,10 +112,14 @@ export function SettingsDialog({ settings, onChange, onClose, libraryRoot, onCho
               <p className="muted small">按空格通常比真正开唱晚一点。打出来整体偏晚就调大，偏早就调小。</p>
             </div>
 
+            <AiSettings />
+
+            <NetworkSettings />
+
             <div className="field">
               <label>版本</label>
               <div className="field-row">
-                <span>{version || "—"}</span>
+                <span>{version ? `波点 ${version}` : "—"}</span>
                 <Btn className="ghost" onClick={() => void checkUpdate()} disabled={checkState.busy}>
                   检查更新
                 </Btn>

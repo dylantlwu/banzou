@@ -1,10 +1,10 @@
-# 伴奏歌词 Banzou
+# 波点 Banzou
 
 给唱歌的人用的 macOS 应用：放伴奏、歌词跟着滚、录唱、修音、每天练声、一键开直播。
 
-> **English**: Banzou is a macOS app for singers. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. Download the latest build (Apple silicon) from [Releases](https://github.com/dylantlwu/banzou/releases/latest). It is not notarized, so on first launch allow it under System Settings → Privacy & Security → Open Anyway.
+> **English**: Banzou (波点) is a macOS app for singers. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. Download the latest build (Apple silicon) from [Releases](https://github.com/dylantlwu/banzou/releases/latest). It is not notarized, so on first launch allow it under System Settings → Privacy & Security → Open Anyway.
 
-**目录**：[安装](#安装) · [5 分钟上手](#5-分钟上手) · [准备素材](#准备素材) · [唱歌](#唱歌) · [歌词](#歌词) · [耳机延迟](#耳机延迟校准) · [录唱](#录唱) · [修音](#修音) · [练声](#练声) · [直播](#直播) · [快捷键](#快捷键) · [常见问题](#常见问题) · [开发](#开发)
+**目录**：[安装](#安装) · [5 分钟上手](#5-分钟上手) · [准备素材](#准备素材) · [唱歌](#唱歌) · [歌词](#歌词) · [耳机延迟](#耳机延迟校准) · [录唱](#录唱) · [修音](#修音) · [练声](#练声) · [直播](#直播) · [电视 KTV](#电视-ktv) · [快捷键](#快捷键) · [常见问题](#常见问题) · [开发](#开发)
 
 ---
 
@@ -15,17 +15,17 @@
 只支持 Apple 芯片的 Mac（M1 或更新）。在 macOS 26 上测试过，更早的系统没测过。
 
 1. 打开 [Releases 页面](https://github.com/dylantlwu/banzou/releases/latest)，下载 `Banzou-版本号-macOS-arm64.zip`
-2. 双击解压，得到「伴奏歌词」，把它拖进「应用程序」文件夹
-3. **第一次打开要多做一步**。这个应用没有经过 Apple 公证（需要付费开发者账号），所以第一次双击会提示「未打开“伴奏歌词”，Apple 无法验证…」：
+2. 双击解压，得到「波点」，把它拖进「应用程序」文件夹
+3. **第一次打开要多做一步**。这个应用没有经过 Apple 公证（需要付费开发者账号），所以第一次双击会提示「未打开“波点”，Apple 无法验证…」：
    - 点「完成」，**不要点「移到废纸篓」**
-   - 打开「系统设置 → 隐私与安全性」，拉到最下面，看到「已阻止“伴奏歌词”…」，点「仍要打开」，输入开机密码确认
+   - 打开「系统设置 → 隐私与安全性」，拉到最下面，看到「已阻止“波点”…」，点「仍要打开」，输入开机密码确认
    - 再双击打开就行，以后不会再问
 4. 第一次录音、练声或直播时会问能不能用麦克风，点「允许」
 
 如果第 3 步在「隐私与安全性」里找不到「仍要打开」，也可以在「终端」里运行下面这行，然后再双击打开：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/伴奏歌词.app
+xattr -dr com.apple.quarantine /Applications/波点.app
 ```
 
 想直播的话还要装 [OBS Studio](https://obsproject.com/)（30 或更新版本），装好就行，不用设置。
@@ -38,6 +38,7 @@ xattr -dr com.apple.quarantine /Applications/伴奏歌词.app
 - 更新后第一次录音时 macOS 可能会再问一次麦克风权限，点「允许」（没有付费的 Apple 签名，macOS 会把新版本当成新应用）
 - 还在用 0.1.0 的话，要手动下载一次新版替换，之后就能自动更新了
 - 不想更新就点「以后再说」，下次打开还会提示
+- 应用以前叫「伴奏歌词」。从旧版自动更新上来的，菜单栏里显示「波点」，「应用程序」里的文件名还是「伴奏歌词」，可以直接改名成「波点」，不影响以后更新。如果又手动下载了一次新版，删掉旧的「伴奏歌词」就行，设置和曲库都不受影响
 
 ### 自己编译
 
@@ -61,7 +62,7 @@ npm install
 npm run tauri build
 ```
 
-完成后应用在 `src-tauri/target/release/bundle/macos/伴奏歌词.app`。把它拖进「应用程序」文件夹，就和普通应用一样打开（自己编译的不需要第 3 步）。
+完成后应用在 `src-tauri/target/release/bundle/macos/波点.app`。把它拖进「应用程序」文件夹，就和普通应用一样打开（自己编译的不需要第 3 步）。
 
 自己编译的版本也会收到更新提示；点「更新」会换成 GitHub 上的官方版本，想保留自己的改动就点「以后再说」。
 
@@ -271,7 +272,7 @@ npm run tauri build
 1. 点左上「直播」，打开直播面板
 2. 第一次：展开「推流设置（TikTok）」，填「推流地址（Server URL）」和「推流码（Stream Key）」。只存在你这台电脑上
 3. 选麦克风，按需要调「直播修音」：强度、自然 ↔ 电音、效果、人声 / 伴奏音量
-4. 点「● 开始直播」。应用会自动打开 OBS，建好「伴奏歌词」场景（歌词 + 声音），然后开始推流。面板显示直播时长
+4. 点「● 开始直播」。应用会自动打开 OBS，建好「波点」场景（歌词 + 声音），然后开始推流。面板显示直播时长
 5. 选歌播放，开唱。面板会实时显示「我 X → 目标 Y · 修正 N 音分」
 6. 唱完点「结束直播」
 
@@ -280,6 +281,28 @@ npm run tauri build
 **只要歌词叠加层**：自己在 OBS 里设置的话，打开「歌词同步到叠加层」，在 OBS 里加一个「浏览器」源，地址填面板里显示的 `http://127.0.0.1:17890/overlay`。也可以用「歌词窗口 · 绿幕 / 黑底」做窗口采集。字号、颜色、位置、是否显示下一句都能调。
 
 注意：直播平台可能会静音或下架用了商业歌曲伴奏的直播。
+
+---
+
+## 电视 KTV
+
+把歌传到客厅的安卓电视上，像 KTV 一样唱：MV 画面 + KTV 歌词（唱到哪变色到哪），原唱 / 伴唱一键切换，用遥控器或手机点歌。在乐视超级电视（安卓 5）上测过。
+
+**第一次设置**
+
+1. 电视要打开网络调试：乐视电视在「应用」页面依次按遥控器的 123、音量 −、音量 +、频道 ∨、频道 ∧（每秒按一个），进工程菜单 → Other Options → 把 adb debug 改成 On。其他品牌搜「电视型号 打开 adb」
+2. 在应用里点顶部的「电视」，第一次会下载 adb（安卓官方工具，Google）
+3. 点「自动找」或者填电视的 IP，连上后点「装到电视上」，电视上就有了「波点」
+
+**传歌**：「电视」窗口里每首歌旁边点「传到电视」。有 MV 会自动用上：要 H.264 编码、长度和伴奏对得上（「做成伴奏」做出来的就对得上）。一首带 MV 的歌大约 50 MB，Wi-Fi 下要两三分钟。电视空间不够就点「从电视删除」，电脑上的文件不动。
+
+**在电视上唱**：确认 = 暂停，上 = 原唱 / 伴唱，下 = 歌词开关，右 = 切歌，左 = 重唱，返回 = 点歌。
+
+**手机 / iPad 遥控**：电视点歌页右上角有网址（http://电视IP:8288），同一个网络里用浏览器打开，能点歌、置顶、切歌，伴奏和人声音量分开调（人声开一点当导唱）。接蓝牙音箱时声音会晚，在「歌词时间」里点「晚一点」。
+
+**麦克风**：别让人声经过电视（会慢半拍）。用带混响的无线话筒接收器：电视声音接进接收器的音乐输入，接收器输出接音箱。
+
+电视 APP 的源码在 `tv/`，改完运行 `tv/build-apk.sh` 重新生成 `src-tauri/tv/BanzouKTV.apk`。
 
 ---
 
@@ -356,7 +379,7 @@ npm run tauri build
 
 **更新后又问麦克风权限。** 正常，点「允许」就行，见[更新](#更新)。
 
-**第一次录音没反应。** macOS 会弹出麦克风权限请求，点「允许」。点过「不允许」的话，到「系统设置 → 隐私与安全性 → 麦克风」里打开「伴奏歌词」。
+**第一次录音没反应。** macOS 会弹出麦克风权限请求，点「允许」。点过「不允许」的话，到「系统设置 → 隐私与安全性 → 麦克风」里打开「波点」。
 
 **点「开始直播」后 OBS 没反应。** 确认 OBS 装在「应用程序」里，版本 30 或更新。第一次用时如果 OBS 已经开着，应用连不上它，会提示「请退出 OBS 再点一次」：退出 OBS 后再点「● 开始直播」，应用会用自己的连接设置重新打开 OBS。
 

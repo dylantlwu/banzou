@@ -1,7 +1,7 @@
 //! 一键开播：通过 OBS 自带的 obs-websocket（v5 协议）控制 OBS。
 //!
 //! 开始直播 = 打开 OBS（第一次会先写好 websocket 配置，带随机密码）→ 连上 →
-//! 建「伴奏歌词」场景，放一个浏览器源（叠加层地址 ?audio=1，声音交给 OBS 混音）→
+//! 建「波点」场景，放一个浏览器源（叠加层地址 ?audio=1，声音交给 OBS 混音）→
 //! 静音 OBS 自己的麦克风输入（人声已经由 app 修好后从浏览器源送进来）→ 填推流地址和推流码 → 开始推流。
 
 use base64::Engine;
@@ -15,8 +15,11 @@ use std::time::{Duration, Instant};
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 pub const PORT: u16 = 4455;
-pub const SCENE: &str = "伴奏歌词";
-pub const SOURCE: &str = "伴奏歌词（歌词 + 声音）";
+pub const SCENE: &str = "波点";
+pub const SOURCE: &str = "波点（歌词 + 声音）";
+/// 改名前（应用叫「伴奏歌词」时）建的场景和浏览器源：还在的话原地改名，不再多建一套
+const OLD_SCENE: &str = "伴奏歌词";
+const OLD_SOURCE: &str = "伴奏歌词（歌词 + 声音）";
 
 fn obs_support_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join("Library/Application Support/obs-studio"))
@@ -218,7 +221,13 @@ pub fn open_and_connect(password: &str) -> Result<Obs, String> {
 pub fn setup_scene(obs: &mut Obs, overlay_url: &str) -> Result<Vec<String>, String> {
     let mut done = Vec::new();
     let scenes = obs.request("GetSceneList", json!({}))?;
-    let exists = scenes["scenes"].as_array().is_some_and(|a| a.iter().any(|s| s["sceneName"] == json!(SCENE)));
+    let has_scene = |name: &str| scenes["scenes"].as_array().is_some_and(|a| a.iter().any(|s| s["sceneName"] == json!(name)));
+    let mut exists = has_scene(SCENE);
+    if !exists && has_scene(OLD_SCENE) {
+        obs.request("SetSceneName", json!({ "sceneName": OLD_SCENE, "newSceneName": SCENE }))?;
+        done.push(format!("场景「{OLD_SCENE}」改名为「{SCENE}」"));
+        exists = true;
+    }
     if !exists {
         obs.request("CreateScene", json!({ "sceneName": SCENE }))?;
         done.push(format!("新建场景「{SCENE}」"));
@@ -235,7 +244,13 @@ pub fn setup_scene(obs: &mut Obs, overlay_url: &str) -> Result<Vec<String>, Stri
     });
     let inputs = obs.request("GetInputList", json!({}))?;
     let list = inputs["inputs"].as_array().cloned().unwrap_or_default();
-    if list.iter().any(|i| i["inputName"] == json!(SOURCE)) {
+    let has_input = |name: &str| list.iter().any(|i| i["inputName"] == json!(name));
+    let mut source_exists = has_input(SOURCE);
+    if !source_exists && has_input(OLD_SOURCE) {
+        obs.request("SetInputName", json!({ "inputName": OLD_SOURCE, "newInputName": SOURCE }))?;
+        source_exists = true;
+    }
+    if source_exists {
         obs.request("SetInputSettings", json!({ "inputName": SOURCE, "inputSettings": settings, "overlay": true }))?;
         // 地址没变时 OBS 不会重新加载；强制刷新，保证用的是这个版本 app 的叠加层页面
         let _ = obs.request("PressInputPropertiesButton", json!({ "inputName": SOURCE, "propertyName": "refreshnocache" }));

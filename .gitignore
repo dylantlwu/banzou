@@ -38,3 +38,12 @@ dist-ssr
 
 # 打包产物（scripts/release.mjs）
 release/
+
+# 曲库里每首歌的资料、笔记、课程（属于用户的曲库，不进仓库）
+*.song.json
+*.notes.md
+*.lesson.json
+
+# 设计稿（含参考图）和本机的 Claude 配置
+设计稿/
+.claude/

@@ -79,7 +79,7 @@ function makeDemo(dir, withLyrics) {
   }
 
   // 人声：每拍一个音，带一点颤音和泛音；句尾最后一个音拖两拍
-  const lrc = ["[ti:示例歌曲]", "[ar:伴奏歌词]", ""];
+  const lrc = ["[ti:示例歌曲]", "[ar:波点]", ""];
   lines.forEach((line, i) => {
     const start = intro + i * bar * 2;
     lrc.push(`[${stamp(start)}]${line.text}`);

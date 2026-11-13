@@ -1,7 +1,7 @@
 [package]
 name = "banzou"
-version = "0.3.0"
-description = "伴奏歌词 Banzou：伴奏、歌词、录唱、修音、练声、直播"
+version = "0.3.1"
+description = "波点 Banzou：伴奏、歌词、录唱、修音、练声、直播"
 authors = ["dylantlwu"]
 license = "MIT"
 repository = "https://github.com/dylantlwu/banzou"
@@ -34,6 +34,7 @@ sha2 = "0.10"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 fast2s = "0.3.1"
+pinyin = "0.11"
 
 [dev-dependencies]
 tempfile = "3"

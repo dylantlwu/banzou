@@ -127,7 +127,7 @@ export function LivePanel({ settings, onChange, onClose, live }: Props) {
             </Btn>
           )}
           <p className="muted small">
-            一键：打开歌词同步和直播修音，打开 OBS、建好「伴奏歌词」场景、开始推流。你的耳机里听原声（插在麦克风的耳机孔上），观众听到的是修过的。
+            一键：打开歌词同步和直播修音，打开 OBS、建好「波点」场景、开始推流。你的耳机里听原声（插在麦克风的耳机孔上），观众听到的是修过的。
           </p>
         </div>
 

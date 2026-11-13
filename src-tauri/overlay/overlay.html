@@ -33,7 +33,7 @@
 <body>
   <div id="current" class="line"></div>
   <div id="next" class="line"></div>
-  <div id="hint">等待「伴奏歌词」…</div>
+  <div id="hint">等待「波点」…</div>
 <script>
 (() => {
   const params = new URLSearchParams(location.search);
@@ -99,13 +99,13 @@
         lines = (msg.lines || []).filter((l) => typeof l.t === "number").sort((a, b) => a.t - b.t);
         if (msg.audioRate && window.__setAudioRate) window.__setAudioRate(msg.audioRate);
         applyStyle(msg.style);
-        hint.textContent = msg.title ? "" : "等待「伴奏歌词」…";
+        hint.textContent = msg.title ? "" : "等待「波点」…";
         curEl.dataset.key = ""; nextEl.dataset.key = "";
       } else if (msg.type === "pos") {
         pos = msg;
       }
     };
-    es.onerror = () => { hint.textContent = "连不上「伴奏歌词」，打开应用后会自动连上"; };
+    es.onerror = () => { hint.textContent = "连不上「波点」，打开应用后会自动连上"; };
   }
 
   connect();

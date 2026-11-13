@@ -20,7 +20,7 @@ export function installTestBridge() {
       return data.ok;
     },
   };
-  document.title = "伴奏歌词（测试模式）";
+  document.title = "波点（测试模式）";
   (window as unknown as { __BANZOU_TEST__: boolean }).__BANZOU_TEST__ = true;
 }
 

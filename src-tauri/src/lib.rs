@@ -1,13 +1,19 @@
+pub mod ai;
 pub mod dsp;
+pub mod learn;
 pub mod library;
 pub mod live;
+pub mod net;
 pub mod lyrics_store;
 pub mod obs;
 pub mod recording;
 pub mod separate;
 pub mod settings;
+pub mod songmeta;
 pub mod studio;
+pub mod tags;
 pub mod transcribe;
+pub mod tv;
 pub mod video;
 
 use std::path::{Path, PathBuf};
@@ -219,7 +225,19 @@ fn rec_discard(path: String) -> Result<(), String> {
 #[tauri::command]
 fn load_takes(title: String) -> Result<serde_json::Value, String> {
     let root = default_library_dir()?;
-    recording::load_takes(&root, &title).map_err(|e| format!("读取录音列表失败：{e}"))
+    // 歌长（读 wav 伴奏的文件头）：判断上次留下的未完成录音是不是异常（资料清单 §5-9）
+    let song_seconds = recording::song_seconds(&root, &title);
+    recording::load_takes(&root, &title, song_seconds).map_err(|e| format!("读取录音列表失败：{e}"))
+}
+
+/// 资料检查：整个曲库的异常录音（超长、没自动恢复的）
+#[tauri::command]
+async fn abnormal_recordings() -> Result<Vec<serde_json::Value>, String> {
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || recording::abnormal_recordings(&root))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("检查异常录音失败：{e}"))
 }
 
 #[tauri::command]
@@ -407,6 +425,259 @@ async fn sep_run(app: tauri::AppHandle, path: String, name: String) -> Result<se
     tauri::async_runtime::spawn_blocking(move || separate::run(&dirs, &root, &path, &name)).await.map_err(|e| e.to_string())?
 }
 
+// ---------- 电视 KTV ----------
+
+fn tv_dirs(app: &tauri::AppHandle) -> Result<video::Dirs, String> {
+    Ok(video::Dirs { tools: app.path().app_data_dir().map_err(|e| e.to_string())?.join("tools"), work: cache_dir(app)?.join("tv") })
+}
+
+#[tauri::command]
+async fn tv_status(app: tauri::AppHandle, addr: String) -> Result<tv::TvStatus, String> {
+    let dirs = tv_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tv::status(&dirs, &addr)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn tv_discover() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(tv::discover).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn tv_install_tools(app: tauri::AppHandle) -> Result<tv::TvStatus, String> {
+    let dirs = tv_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tv::install_tools(&dirs)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn tv_install_app(app: tauri::AppHandle, addr: String) -> Result<(), String> {
+    let dirs = tv_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tv::install_app(&dirs, &addr)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn tv_open_app(app: tauri::AppHandle, addr: String) -> Result<(), String> {
+    let dirs = tv_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tv::open_app(&dirs, &addr)).await.map_err(|e| e.to_string())?
+}
+
+/// 每首歌挑一个能放到电视上的 MV（读文件信息，几十首要一两秒）
+#[tauri::command]
+async fn tv_choose_mv(app: tauri::AppHandle, accompaniment: String, videos: Vec<String>) -> Result<tv::MvChoice, String> {
+    let dirs = tv_dirs(&app)?;
+    let root = default_library_dir()?;
+    tv::PushRequest { accompaniment: accompaniment.clone(), ..Default::default() }.check_inside(&root)?;
+    let videos: Vec<PathBuf> = videos.into_iter().map(PathBuf::from).filter(|v| v.starts_with(&root)).collect();
+    tauri::async_runtime::spawn_blocking(move || tv::choose_mv(&dirs, Path::new(&accompaniment), &videos)).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn tv_push(app: tauri::AppHandle, addr: String, req: tv::PushRequest) -> Result<tv::Pushed, String> {
+    let dirs = tv_dirs(&app)?;
+    req.check_inside(&default_library_dir()?)?;
+    tauri::async_runtime::spawn_blocking(move || tv::push(&dirs, &addr, &req)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn tv_remove(app: tauri::AppHandle, addr: String, title: String) -> Result<(), String> {
+    let dirs = tv_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tv::remove(&dirs, &addr, &title)).await.map_err(|e| e.to_string())?
+}
+
+/// 曲库里有伴奏的歌 → 电视歌单（编号、显示名、歌手等从资料表来，见 songmeta.rs）
+fn tv_catalog_songs(root: &Path) -> Result<Vec<tv::CatalogSong>, String> {
+    Ok(tv_catalog(root, &serde_json::Value::Null)?.0)
+}
+
+/// 电视歌单 + 给电视用的标签（资料表合并 tags.json 的歌单）
+fn tv_catalog(root: &Path, tags: &serde_json::Value) -> Result<(Vec<tv::CatalogSong>, serde_json::Value), String> {
+    let lib = library::scan_dir(root).map_err(|e| format!("扫描曲库失败：{e}"))?;
+    Ok(songmeta::catalog_songs(root, &lib, tags))
+}
+
+/// 把全部歌曲的歌单和副歌预览同步到电视
+#[tauri::command]
+async fn tv_sync_catalog(app: tauri::AppHandle, addr: String) -> Result<tv::Synced, String> {
+    let dirs = tv_dirs(&app)?;
+    let root = default_library_dir()?;
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let tags = settings::load_store(&config, "tags").unwrap_or(serde_json::Value::Null);
+    let pulled = dirs.work.join("plays-from-tv.json");
+    let plays = config.join("plays.json");
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _ = std::fs::remove_file(&pulled);
+        let (songs, tags) = tv_catalog(&root, &tags)?;
+        let r = tv::sync_catalog(&dirs, &addr, &songs, &tags, &pulled);
+        // 电视上的点歌次数拉回来才覆盖本地的
+        if pulled.is_file() && serde_json::from_slice::<serde_json::Value>(&std::fs::read(&pulled).unwrap_or_default()).is_ok_and(|v| v.is_object()) {
+            let _ = std::fs::copy(&pulled, &plays);
+        }
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    result
+}
+
+#[tauri::command]
+fn ai_key_status(app: tauri::AppHandle) -> Result<bool, String> {
+    Ok(tags::has_key(&app.path().app_config_dir().map_err(|e| e.to_string())?))
+}
+
+/// 保存 Claude API key（空字符串 = 删掉）。key 只存在本机配置目录，不会再传回界面
+#[tauri::command]
+fn ai_key_save(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    tags::save_key(&app.path().app_config_dir().map_err(|e| e.to_string())?, &key)
+}
+
+/// 外语学唱：Claude key 和豆包语音填了没有（只给末四位）、音色、语速
+#[tauri::command]
+fn ai_status(app: tauri::AppHandle) -> Result<ai::AiStatus, String> {
+    Ok(ai::status(&app.path().app_config_dir().map_err(|e| e.to_string())?))
+}
+
+/// 外语学唱：保存豆包语音的 APP ID / Access Token / 音色 / 语速（没传的不动，空字符串 = 删掉）
+#[tauri::command]
+fn ai_save_tts(app: tauri::AppHandle, patch: ai::TtsPatch) -> Result<(), String> {
+    ai::save_tts(&app.path().app_config_dir().map_err(|e| e.to_string())?, &patch)
+}
+
+/// 外语学唱：问 Claude 一句，确认 key、余额、网络
+#[tauri::command]
+async fn ai_test_claude(app: tauri::AppHandle) -> Result<ai::ClaudeReply, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || ai::test_claude(&dir)).await.map_err(|e| e.to_string())?
+}
+
+/// 外语学唱：用豆包念一句试听，返回 mp3（base64）
+#[tauri::command]
+async fn ai_test_tts(app: tauri::AppHandle, text: String) -> Result<ai::SpokenTest, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || ai::test_tts(&dir, &text)).await.map_err(|e| e.to_string())?
+}
+
+/// 外语学唱：两本老师笔记（通用 + 这首歌）
+#[tauri::command]
+fn learn_notes(app: tauri::AppHandle, title: Option<String>) -> Result<learn::NotesView, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir().ok();
+    Ok(learn::notes_view(&config, root.as_deref(), title.as_deref()))
+}
+
+/// 外语学唱：在应用里改老师笔记（index 为空 = 加一条，text 为空 = 删掉）
+#[tauri::command]
+fn learn_note_set(app: tauri::AppHandle, scope: learn::notes::Scope, title: Option<String>, index: Option<usize>, text: String) -> Result<(), String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    learn::note_set(&config, &default_library_dir()?, scope, title.as_deref(), index, &text)
+}
+
+/// 外语学唱：撤销老师刚记下的一条笔记
+#[tauri::command]
+fn learn_undo_remember(app: tauri::AppHandle, title: String, remembered: learn::teacher::Remembered) -> Result<(), String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    learn::teacher::undo_remember(&config, &default_library_dir()?, &title, &remembered)
+}
+
+/// 外语学唱：这首歌和老师的对话
+#[tauri::command]
+fn learn_chat(title: String) -> Result<Vec<learn::teacher::Turn>, String> {
+    Ok(learn::teacher::load_chat(&default_library_dir()?, &title))
+}
+
+#[tauri::command]
+fn learn_chat_clear(title: String) -> Result<(), String> {
+    learn::teacher::clear_chat(&default_library_dir()?, &title)
+}
+
+/// 外语学唱：问老师一句（老师可能顺手记笔记）
+#[tauri::command]
+async fn learn_ask(app: tauri::AppHandle, title: String, question: String, language: Option<String>) -> Result<learn::teacher::Turn, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    let language = language.unwrap_or_else(|| learn::teacher::DEFAULT_LANGUAGE.to_string());
+    tauri::async_runtime::spawn_blocking(move || learn::teacher::ask(&config, &root, &title, &question, &language)).await.map_err(|e| e.to_string())?
+}
+
+/// 外语学唱：用豆包念老师的话（先按笔记里的读音替换）
+#[tauri::command]
+async fn learn_speak(app: tauri::AppHandle, title: Option<String>, text: String) -> Result<learn::teacher::Spoken, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || learn::teacher::speak(&config, &root, title.as_deref(), &text)).await.map_err(|e| e.to_string())?
+}
+
+/// 网络路线：每个外部服务走哪条路（直连 / 跟系统走）
+#[tauri::command]
+fn net_services(app: tauri::AppHandle) -> Result<Vec<net::Service>, String> {
+    Ok(net::services(&app.path().app_config_dir().map_err(|e| e.to_string())?))
+}
+
+/// 网络路线：改一个服务的路线；route 为空 = 恢复默认
+#[tauri::command]
+fn net_set_route(app: tauri::AppHandle, id: String, route: Option<net::Route>) -> Result<(), String> {
+    net::set_route(&app.path().app_config_dir().map_err(|e| e.to_string())?, &id, route)
+}
+
+/// 网络路线：按现在的路线连一下
+#[tauri::command]
+async fn net_test(app: tauri::AppHandle, id: String) -> Result<net::TestResult, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || net::test(&dir, &id)).await.map_err(|e| e.to_string())?
+}
+
+/// 给歌打标签（联网查资料）。retag=false 只打还缺标签的歌；retag=true 重打全部，但手动改过的字段不动。
+/// 用户手动改过的歌最多 20 首当范例一起发给 AI。返回本次猜了几首
+#[tauri::command]
+async fn ai_tag_songs(app: tauri::AppHandle, retag: Option<bool>, titles: Option<Vec<String>>, hints: Option<std::collections::HashMap<String, String>>) -> Result<serde_json::Value, String> {
+    let retag = retag.unwrap_or(false);
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    let dirs = tv_dirs(&app)?;
+    // 写进每首歌的资料表（songmeta.rs），用户填的不覆盖；没有歌词的顺手去 LRCLIB 搜
+    tauri::async_runtime::spawn_blocking(move || {
+        let tags = settings::load_store(&config, "tags").unwrap_or(serde_json::Value::Null);
+        songmeta::ai_fill(&config, &root, &tags, titles.as_deref(), retag, hints.as_ref(), |p| video::media_info(&dirs, p).duration)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 资料表相关命令（tags_load、tags_save、songs_check、song_meta_save、song_rename_plan、song_rename、
+/// songs_migrate_plan、songs_migrate），实现在 songmeta::command，测试桥也走同一个入口
+#[tauri::command]
+async fn song_meta(app: tauri::AppHandle, cmd: String, args: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    let tv_cache = tv_dirs(&app)?.work;
+    tauri::async_runtime::spawn_blocking(move || songmeta::command(&root, &config, &tv_cache, &cmd, &args.unwrap_or_default()).unwrap_or_else(|| Err(format!("不认识的命令：{cmd}"))))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 后台：电视上点了还没传过去的歌，波点开着就自动传
+fn start_tv_request_watcher(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(8));
+            let Ok(config) = app.path().app_config_dir() else { continue };
+            let addr = settings::load_store(&config, "tv").ok().and_then(|v| v["address"].as_str().map(str::to_string));
+            let (Some(addr), Ok(root), Ok(dirs)) = (addr, default_library_dir(), tv_dirs(&app)) else { continue };
+            let Ok(songs) = tv_catalog_songs(&root) else { continue };
+            let _ = tv::serve_requests(&dirs, &addr, &songs);
+        }
+    });
+}
+
+#[tauri::command]
+fn tv_job(app: tauri::AppHandle) -> Result<Option<video::Job>, String> {
+    Ok(video::job_status(&tv_dirs(&app)?))
+}
+
+#[tauri::command]
+fn tv_cancel(app: tauri::AppHandle) -> Result<(), String> {
+    video::cancel(&tv_dirs(&app)?);
+    Ok(())
+}
+
 // ---------- 一键开播（OBS） ----------
 
 #[tauri::command]
@@ -437,6 +708,7 @@ pub fn run() {
             {
                 let _ = use_library(app.handle(), dir);
             }
+            start_tv_request_watcher(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -463,6 +735,7 @@ pub fn run() {
             load_takes,
             save_takes,
             trash_takes,
+            abnormal_recordings,
             audio_route,
             analyze_pitch,
             render_take,
@@ -491,7 +764,36 @@ pub fn run() {
             to_simplified,
             sep_status,
             sep_install,
-            sep_run
+            sep_run,
+            tv_status,
+            tv_discover,
+            tv_install_tools,
+            tv_install_app,
+            tv_open_app,
+            tv_choose_mv,
+            tv_push,
+            tv_remove,
+            tv_sync_catalog,
+            ai_key_status,
+            ai_key_save,
+            ai_tag_songs,
+            ai_status,
+            ai_save_tts,
+            ai_test_claude,
+            ai_test_tts,
+            learn_notes,
+            learn_note_set,
+            learn_undo_remember,
+            learn_chat,
+            learn_chat_clear,
+            learn_ask,
+            learn_speak,
+            net_services,
+            net_set_route,
+            net_test,
+            tv_job,
+            tv_cancel,
+            song_meta
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
