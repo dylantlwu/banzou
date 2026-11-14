@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use super::notes::{self, Note, Scope};
+use super::reading;
 use crate::{ai, library, recording, settings, songmeta};
 
 const CHAT_FILE: &str = "teacher-chat.json";
@@ -47,6 +48,9 @@ pub struct Turn {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remembered: Vec<Remembered>,
+    /// 程序按读音表改掉的读音（老师写的 `原文{读音}` 和表里不一致时）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixes: Vec<super::lesson::Fix>,
 }
 
 #[derive(Debug, Default, Serialize, serde::Deserialize)]
@@ -99,6 +103,8 @@ pub struct SongInfo {
     pub lang: Option<String>,
     pub artist: Option<String>,
     pub annotations: Vec<String>,
+    /// 资料表里的视频标题（下载视频时记下的 YouTube 标题），也是歌曲自带标注
+    pub video_title: Option<String>,
     pub lyrics: Option<String>,
 }
 
@@ -132,6 +138,7 @@ pub fn song_info(root: &Path, title: &str) -> SongInfo {
         info.title_reading = m.text("titleReading").map(str::to_string);
         info.lang = m.text("lang").map(str::to_string);
         info.artist = m.text("artist").map(str::to_string);
+        info.video_title = super::lesson::video_title(m);
     }
     info.artist = info.artist.or(song.artist);
     info.annotations = song
@@ -151,8 +158,10 @@ fn rules(language: &str) -> String {
 
 怎么回答：
 - 用{language}回答，口语、简短，一般一到三句话；我问得细再展开。你的话会被念出来，不要用 Markdown 标题、列表符号、表格、表情。
-- 讲到歌词里的外语词时写原文，需要时在后面括号注读音。
 - 歌名、人名、地名这类专有名词的读音，以这首歌自带的标注为准（原视频文件名里的罗马音、歌词注音）；没有标注又拿不准时，说「读音待确认」并问我，不要按常见读法猜。
+- 读音一律先查读音表（系统提示里的「读音表」，表里没有就调用 lookup_reading 查）；表里标「待确认」的，就说读音待确认，不要自己定。
+- 不要断言音高重音（哪个音高、哪个音低），这一点你没有可靠来源。
+- 提到歌曲语言的词或短语（歌名、歌词里的词）时，一律写成「原文{{读音}}」，比如 夏実{{かじつ}}、花火{{はなび}}；原文前后用空格或标点和中文隔开，比如「这首歌叫 夏実{{かじつ}}」。日语读音写平假名，必须来自读音表（表里没有就先调用 lookup_reading）。表里标待确认的写成 原文{{?}}，并说读音待确认。屏幕上会显示成注音，念的时候只念花括号里的读音，所以不要再另外用括号注读音。只有假名的词（比如 は）不用标。
 
 老师笔记：
 - 下面「老师笔记」里是我纠正过你、或者让你记住的事。它们比你自己知道的优先，每次回答都照做，不用提起笔记本身。
@@ -173,7 +182,7 @@ fn notes_block(heading: &str, scope: Scope, notes: &[Note]) -> String {
     out
 }
 
-fn song_block(song: &SongInfo, song_notes: &[Note]) -> String {
+fn song_block(song: &SongInfo, song_notes: &[Note], table: &reading::Table) -> String {
     let mut out = String::from("## 正在学的歌\n");
     match song.shown_title.as_deref().filter(|t| *t != song.title) {
         Some(t) => out += &format!("歌名：{t}（我在资料表里确认过；文件名里叫 {}）\n", song.title),
@@ -188,11 +197,12 @@ fn song_block(song: &SongInfo, song_notes: &[Note]) -> String {
     if let Some(a) = &song.artist {
         out += &format!("原唱：{a}\n");
     }
-    if song.annotations.is_empty() {
+    let annotations = super::lesson::annotations(song);
+    if annotations.is_empty() {
         out += "歌曲自带的标注：没有\n";
     } else {
-        out += "歌曲自带的标注（原视频的文件名，通常就是 YouTube 标题）：\n";
-        for a in &song.annotations {
+        out += "歌曲自带的标注（原视频的文件名、YouTube 标题）：\n";
+        for a in &annotations {
             out += &format!("- {a}\n");
         }
     }
@@ -201,16 +211,31 @@ fn song_block(song: &SongInfo, song_notes: &[Note]) -> String {
         None => out += "歌词：还没有\n",
     }
     out += "\n";
-    out + &notes_block("老师笔记（这首歌）", Scope::Song, song_notes)
+    out += &notes_block("老师笔记（这首歌）", Scope::Song, song_notes);
+    out + "\n" + &reading::prompt_block(table)
 }
 
 /// 系统提示：守则、通用笔记、这首歌三段，最后一段打缓存标记（前面两段一起缓存）
-pub fn system_blocks(language: &str, global: &[Note], song: &SongInfo, song_notes: &[Note]) -> Value {
+pub fn system_blocks(language: &str, global: &[Note], song: &SongInfo, song_notes: &[Note], table: &reading::Table) -> Value {
     json!([
         { "type": "text", "text": rules(language) },
         { "type": "text", "text": notes_block("老师笔记（所有歌）", Scope::Global, global) },
-        { "type": "text", "text": song_block(song, song_notes), "cache_control": { "type": "ephemeral" } },
+        { "type": "text", "text": song_block(song, song_notes, table), "cache_control": { "type": "ephemeral" } },
     ])
+}
+
+fn lookup_tool() -> Value {
+    json!({
+        "name": "lookup_reading",
+        "description": "查这首歌读音表里一个词的读音、来源、是不是待确认；表里没有的词，装了词典时现场分析（没经过确认）。讲读音之前先查。",
+        "strict": true,
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["word"],
+            "properties": { "word": { "type": "string", "description": "原文，比如 夏実、花火" } }
+        }
+    })
 }
 
 fn remember_tool() -> Value {
@@ -234,7 +259,7 @@ fn remember_tool() -> Value {
 // ---------------------------------------------------------------- 问老师
 
 /// 今天的日期（本地时区，笔记行尾用）
-fn today() -> String {
+pub(crate) fn today() -> String {
     let out = std::process::Command::new("/bin/date").arg("+%Y-%m-%d").output().ok();
     out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| s.len() == 10).unwrap_or_default()
 }
@@ -318,8 +343,9 @@ pub fn ask(config: &Path, root: &Path, title: &str, question: &str, language: &s
     }
     let mut chat = load_chat_file(root, title);
     let song = song_info(root, title);
-    let system = system_blocks(language, &notes::load_global(config), &song, &notes::load(&notes::song_path(root, title)));
-    let tools = json!([remember_tool()]);
+    let table = super::lesson::refresh_table(config, root, title).unwrap_or_default();
+    let system = system_blocks(language, &notes::load_global(config), &song, &notes::load(&notes::song_path(root, title)), &table);
+    let tools = json!([remember_tool(), lookup_tool()]);
 
     let user = json!({ "role": "user", "content": [{ "type": "text", "text": question }] });
     // 这一轮发给 API 的（含 thinking 块，工具调用前后要原样带回）和要存下来的
@@ -383,6 +409,10 @@ pub fn ask(config: &Path, root: &Path, title: &str, question: &str, language: &s
                     }
                     Err(e) => (format!("没记下：{e}"), true),
                 }
+            } else if call.get("name").and_then(Value::as_str) == Some("lookup_reading") {
+                let word = call.get("input").and_then(|i| i.get("word")).and_then(Value::as_str).unwrap_or("");
+                let an = reading::analyzers(&reading::tools_dir(config));
+                (reading::lookup(&table, an.as_deref(), word).to_string(), false)
             } else {
                 ("没有这个工具".to_string(), true)
             };
@@ -402,9 +432,24 @@ pub fn ask(config: &Path, root: &Path, title: &str, question: &str, language: &s
     }
 
     let text = if texts.is_empty() && !remembered.is_empty() { "好的，记下了。".to_string() } else { texts.join("\n\n") };
-    let turn = Turn { role: "teacher".into(), text, remembered };
+    // 老师写的 `原文{读音}` 按读音表核对；这一轮刚记下笔记（比如纠正了读音）就先重建表。
+    // 存进历史的也改掉，下一轮老师看到的是对的
+    let table = if remembered.is_empty() { table } else { super::lesson::refresh_table(config, root, title).unwrap_or(table) };
+    let an = reading::analyzers(&reading::tools_dir(config));
+    let (text, fixes) = super::marked::check(&text, &table, an.as_deref(), "回答");
+    if !fixes.is_empty() {
+        for m in keep.iter_mut().filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant")) {
+            for b in m.get_mut("content").and_then(Value::as_array_mut).into_iter().flatten() {
+                if let Some(t) = b.get("text").and_then(Value::as_str) {
+                    let fixed = super::marked::check(t, &table, an.as_deref(), "回答").0;
+                    b["text"] = Value::from(fixed);
+                }
+            }
+        }
+    }
+    let turn = Turn { role: "teacher".into(), text, remembered, fixes };
     chat.messages.extend(keep);
-    chat.turns.push(Turn { role: "me".into(), text: question.to_string(), remembered: Vec::new() });
+    chat.turns.push(Turn { role: "me".into(), text: question.to_string(), remembered: Vec::new(), fixes: Vec::new() });
     chat.turns.push(turn.clone());
     save_chat_file(root, title, &chat)?;
     Ok(turn)
@@ -413,7 +458,7 @@ pub fn ask(config: &Path, root: &Path, title: &str, question: &str, language: &s
 /// 撤销老师刚记下的一条
 /// 笔记里记的是这首歌歌名的读音：同步写进资料表的 titleReading（读音以资料表为准）。
 /// `reading` 为空 = 删掉。返回有没有写
-fn sync_title_reading(config: &Path, root: &Path, title: &str, word: &str, reading: &str) -> Result<bool, String> {
+pub(crate) fn sync_title_reading(config: &Path, root: &Path, title: &str, word: &str, reading: &str) -> Result<bool, String> {
     let lib = library::scan_dir(root).map_err(|e| format!("扫描曲库失败：{e}"))?;
     let Ok(song) = songmeta::find(&lib, title) else { return Ok(false) };
     let shown = song.meta.as_ref().map(|m| m.shown_title().to_string()).unwrap_or_else(|| song.title.clone());
@@ -451,7 +496,7 @@ fn clean_for_speech(text: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// 实际发给豆包的文字：按两本笔记里的读音条目替换（这首歌的优先）
+/// 实际发给豆包的文字（换引擎也用它）：`原文{读音}` 只念读音，再按两本笔记里的读音条目替换（这首歌的优先）
 pub fn speech_text(config: &Path, root: &Path, title: Option<&str>, text: &str) -> String {
     let mut all = Vec::new();
     if let Some(t) = title {
@@ -464,7 +509,47 @@ pub fn speech_text(config: &Path, root: &Path, title: Option<&str>, text: &str) 
         all.extend(notes::load(&notes::song_path(root, t)));
     }
     all.extend(notes::load_global(config));
-    clean_for_speech(&notes::apply_readings(text, &notes::readings(&all)))
+    // 老师写成 `原文{读音}` 的只念读音（PRD 4.12），豆包不会把没假名的「花火」「心」按中文念。
+    // 先换这个，再按笔记换剩下没标的词
+    let marked = super::marked::has_marks(text);
+    let text = if marked { super::marked::spoken(text) } else { text.to_string() };
+    let text = notes::apply_readings(&text, &notes::readings(&all));
+    // 旧的回答没有花括号：照旧只换括在「」『』《》里的词，不括的不换，免得把中文里的「心」念成こころ
+    let text = match title.and_then(|t| reading::load_table(root, t)).filter(|_| !marked) {
+        Some(table) => apply_table_in_quotes(&text, &table),
+        None => text,
+    };
+    clean_for_speech(&text)
+}
+
+/// 括号里的词按读音表换成读音；待确认的不换
+pub fn apply_table_in_quotes(text: &str, table: &reading::Table) -> String {
+    let mut words: Vec<&reading::Reading> = table.words.iter().filter(|w| !w.needs_review).collect();
+    words.sort_by_key(|w| std::cmp::Reverse(w.word.chars().count()));
+    let mut out = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    let mut quoted = String::new();
+    for c in text.chars() {
+        match c {
+            '「' | '『' | '《' => {
+                depth += 1;
+                out.push(c);
+            }
+            '」' | '』' | '》' if depth > 0 => {
+                let mut q = std::mem::take(&mut quoted);
+                for w in &words {
+                    q = q.replace(&w.word, &w.reading);
+                }
+                out.push_str(&q);
+                out.push(c);
+                depth -= 1;
+            }
+            _ if depth > 0 => quoted.push(c),
+            _ => out.push(c),
+        }
+    }
+    out.push_str(&quoted);
+    out
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -515,7 +600,7 @@ mod tests {
         let song = SongInfo { title: "AKASAKI".into(), annotations: vec!["【AKASAKI】夏実 ⧸ Kajitsu（Lyric Video）".into()], ..Default::default() };
         let global = vec![Note { text: "歌名一律叫原文".into(), tag: None }];
         let local = vec![Note { text: "读音：夏実 = かじつ（Kajitsu）".into(), tag: None }];
-        let sys = system_blocks("中文", &global, &song, &local);
+        let sys = system_blocks("中文", &global, &song, &local, &reading::Table::default());
         let blocks = sys.as_array().unwrap();
         assert_eq!(blocks.len(), 3);
         assert!(blocks[1]["text"].as_str().unwrap().contains("G1. 歌名一律叫原文"));
@@ -523,7 +608,7 @@ mod tests {
         assert!(last.contains("夏実 ⧸ Kajitsu") && last.contains("S1. 读音：夏実 = かじつ"));
         assert!(blocks[2].get("cache_control").is_some() && blocks[0].get("cache_control").is_none());
         // 守则不随歌变：前缀稳定才能缓存
-        let other = system_blocks("中文", &[], &SongInfo::default(), &[]);
+        let other = system_blocks("中文", &[], &SongInfo::default(), &[], &reading::Table::default());
         assert_eq!(other[0], blocks[0]);
     }
 
@@ -566,10 +651,43 @@ mod tests {
         assert!(m.by_user("titleReading"));
         // 歌名信息进系统提示；念的时候按资料表换
         let info = song_info(r, "夏実");
-        assert!(song_block(&info, &[]).contains("歌名读音：かじつ（Kajitsu）"));
+        assert!(song_block(&info, &[], &reading::Table::default()).contains("歌名读音：かじつ（Kajitsu）"));
         assert_eq!(speech_text(c, r, Some("夏実"), "《夏実》"), "《かじつ》");
         undo_remember(c, r, "夏実", &rem).unwrap();
         assert_eq!(read(), None);
+    }
+
+    #[test]
+    fn doubao_gets_table_readings_inside_quotes_only() {
+        let notes = [Note { text: "读音：夏実 = かじつ".into(), tag: None }];
+        let t = reading::build(
+            None,
+            &reading::Inputs { song_notes: &notes, claude: vec![("花火".into(), "はなび".into())], ..Default::default() },
+        );
+        // 花火 只有 Claude 给过 → 待确认，不换；夏実 是笔记 → 换
+        let out = apply_table_in_quotes("「夏実」里的「花火」，花火大会的夏実", &t);
+        assert_eq!(out, "「かじつ」里的「花火」，花火大会的夏実");
+        assert_eq!(apply_table_in_quotes("没有括号「", &t), "没有括号「");
+    }
+
+    #[test]
+    fn doubao_gets_only_readings_from_braces() {
+        let config = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (c, r) = (config.path(), root.path());
+        fs::write(r.join("夏実 - 伴奏.wav"), b"").unwrap();
+        let notes = [Note { text: "读音：夏実 = かじつ".into(), tag: None }, Note { text: "读音：心 = こころ".into(), tag: None }];
+        reading::save_table(r, "夏実", &reading::build(None, &reading::Inputs { song_notes: &notes, ..Default::default() })).unwrap();
+        let say = |t: &str| speech_text(c, r, Some("夏実"), t);
+        // 花括号里的读音照念，原文不念；不带假名的汉字词也只送读音
+        assert_eq!(say("这首歌叫 夏実{かじつ}"), "这首歌叫 かじつ");
+        assert_eq!(say("注意 花火{はなび} 的 は"), "注意 はなび 的 は");
+        assert_eq!(say("心{こころ} 这个字，和 花火{はなび} 一起"), "こころ 这个字，和 はなび 一起");
+        assert_eq!(say("美月{?} 读音待确认"), "这个词 读音待确认");
+        // 有花括号时，中文里没标的「心」不按表换（只看花括号）
+        assert_eq!(say("开心的 心{こころ}"), "开心的 こころ");
+        // 旧回答没有花括号：照旧换「」里的
+        assert_eq!(say("「心」是 heart，开心"), "「こころ」是 heart，开心");
     }
 
     #[test]

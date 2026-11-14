@@ -38,6 +38,12 @@ export interface Settings {
   liveMicId: string;
   /** 演唱页显示音高窗口（原唱音高 + 我唱的） */
   showPitch: boolean;
+  /** 总音量 0–1（播放栏的喇叭；歌曲、老师说话都跟着它） */
+  masterVolume: number;
+  /** 点喇叭静音；再点恢复到 masterVolume */
+  masterMuted: boolean;
+  /** 新手导航看完或跳过了（PRD 4.0.1）；false 时打开应用自动出现 */
+  tourDone: boolean;
 }
 
 export type LivePosition = "bottom" | "center" | "top";
@@ -67,6 +73,9 @@ export const DEFAULT_SETTINGS: Settings = {
   liveAccGain: 0.8,
   liveMicId: "",
   showPitch: true,
+  masterVolume: 1,
+  masterMuted: false,
+  tourDone: false,
 }
 
 type NumericKey =
@@ -79,7 +88,8 @@ type NumericKey =
   | "liveTuneStrength"
   | "liveTuneSpeed"
   | "liveVoiceGain"
-  | "liveAccGain";
+  | "liveAccGain"
+  | "masterVolume";
 const RANGES: Record<NumericKey, [number, number]> = {
   outputLatencyMs: [0, 600],
   reactionMs: [0, 400],
@@ -91,6 +101,7 @@ const RANGES: Record<NumericKey, [number, number]> = {
   liveTuneSpeed: [0, 1],
   liveVoiceGain: [0, 1.5],
   liveAccGain: [0, 1.5],
+  masterVolume: [0, 1],
 };
 
 /** 把读到的任意 JSON 规整成合法设置：缺的用默认值，超范围的截断 */
@@ -108,6 +119,8 @@ export function normalizeSettings(raw: unknown): Settings {
   if (typeof obj.liveShowNext === "boolean") out.liveShowNext = obj.liveShowNext;
   if (typeof obj.liveTune === "boolean") out.liveTune = obj.liveTune;
   if (typeof obj.showPitch === "boolean") out.showPitch = obj.showPitch;
+  if (typeof obj.masterMuted === "boolean") out.masterMuted = obj.masterMuted;
+  if (typeof obj.tourDone === "boolean") out.tourDone = obj.tourDone;
   for (const k of ["obsPassword", "streamServer", "streamKey", "liveMicId"] as const) {
     if (typeof obj[k] === "string") out[k] = (obj[k] as string).slice(0, 500);
   }

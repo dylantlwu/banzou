@@ -3,6 +3,10 @@ import { Btn } from "../components/Btn";
 import { TeacherChat } from "../learn/TeacherChat";
 import { TeacherNotes } from "../learn/TeacherNotes";
 import { type NotesView, loadNotes } from "../learn/api";
+import { Furigana } from "../learn/Furigana";
+import { LessonLineInfo, LessonPanel, useLearnView } from "../learn/LessonPanel";
+import { ReadingEditor } from "../learn/ReadingEditor";
+import { readingLine } from "../learn/readingApi";
 import { type LrcDoc, effectiveTime, findLineIndex } from "../lyrics/lrc";
 import { formatTime } from "../utils/time";
 import { Splitter } from "./split";
@@ -46,6 +50,8 @@ export function learnSections(doc: LrcDoc | null): LearnLine[][] {
 interface Props {
   /** 歌名键：笔记和对话按它存 */
   title: string;
+  /** 稳定编号：读音表、课程按它找歌 */
+  songId: string;
   /** 歌曲自带的标注（原视频文件名） */
   annotations: string[];
   doc: LrcDoc | null;
@@ -61,7 +67,7 @@ interface Props {
  * 学唱模式（PRD 4.12）：左边句子、中间这一句 + 老师笔记、右边问老师。
  * 「听 / 念 / 唱 / 点评」四步和每句的小珠子等学唱功能做出来再接到这里
  */
-export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLoop, loop }: Props) {
+export function LearnMode({ title, songId, annotations, doc, time, onPlayLine, onClearLoop, loop }: Props) {
   const sections = useMemo(() => learnSections(doc), [doc]);
   const lines = useMemo(() => sections.flat(), [sections]);
   const playingIdx = doc ? findLineIndex(doc, time) : -1;
@@ -82,6 +88,27 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
       .catch((e) => setNotesError(String(e)));
   }, [title]);
   useEffect(reload, [reload]);
+
+  // 读音表和课程（PRD 4.12）：笔记一改读音表跟着变，所以两个一起刷新
+  const learn = useLearnView(songId);
+  const [word, setWord] = useState<string | null>(null);
+  useEffect(() => setWord(null), [songId]);
+  // 左边句子列表跟着当前句滚到看得见（跳到最后一句时也看得到是哪句）
+  useEffect(() => {
+    void document.querySelector(".learn-lines .learn-line.on")?.scrollIntoView({ block: "nearest" });
+  }, [focus?.index]);
+  // 从「等你确认」点一个词：先跳到它所在的那一句（不放），编辑框开在那句下面，看得到上下文
+  const pickWord = (w: string) => {
+    const at = focus?.text.includes(w) ? focus : lines.find((l) => l.text.includes(w));
+    if (at) setPicked(at.index);
+    setWord(w);
+  };
+  const reloadAll = () => {
+    reload();
+    learn.reload();
+  };
+  /** 这一句在「有字的句子」里排第几（读音表和课程按这个编号） */
+  const lineNo = focus ? lines.findIndex((l) => l.index === focus.index) : -1;
 
   const play = (l: LearnLine) => {
     setPicked(l.index);
@@ -117,7 +144,20 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
         <div className="learn-focus">
           {focus ? (
             <>
-              <div className="learn-orig">{focus.text}</div>
+              <div className="learn-orig">
+                <Furigana text={focus.text} table={learn.view?.table} onPick={setWord} picked={word} />
+              </div>
+              {learn.view && learn.view.table.words.length > 0 && <div className="learn-reading-line">{readingLine(focus.text, learn.view.table)}</div>}
+              {word && learn.view && (
+                <ReadingEditor
+                  songId={songId}
+                  word={word}
+                  table={learn.view.table}
+                  onSaved={() => reloadAll()}
+                  onClose={() => setWord(null)}
+                />
+              )}
+              <LessonLineInfo view={learn.view} index={lineNo} />
               <div className="learn-act">
                 <Btn className="primary big-btn" onClick={() => play(focus)} disabled={focus.start === null}>
                   放这一句
@@ -128,17 +168,20 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
                   </Btn>
                 )}
               </div>
-              <p className="muted small">读音、意思、难点和「听 / 念 / 唱 / 点评」四步还在做；现在可以一句一句放，有问题问右边的老师。</p>
+              <p className="muted small">
+                {learn.view?.japanese ? "点带注音的词能确认或改读音。" : ""}「听 / 念 / 唱 / 点评」四步还在做；现在可以一句一句放，有问题问右边的老师。
+              </p>
             </>
           ) : (
             <p className="muted">选一句开始</p>
           )}
         </div>
-        <Splitter id="learn-notes-h" axis="y" target="next" min={60} max={0.85} />
+        <Splitter id="learn-notes-h" axis="y" target="next" min={60} max={0.6} />
         <div className="learn-notes learn-mode-notes">
+          <LessonPanel songId={songId} view={learn.view} error={learn.error} onChanged={reloadAll} onPickWord={pickWord} />
           {annotations.length > 0 && <p className="muted small">歌曲自带的标注：{annotations.join(" / ")}</p>}
           <h3>老师笔记 · 这首歌</h3>
-          {notes && <TeacherNotes scope="song" title={title} notes={notes.song} onChanged={reload} empty="还没有。老师说错了就在右边纠正它，它会记在这里。" />}
+          {notes && <TeacherNotes scope="song" title={title} notes={notes.song} onChanged={reloadAll} empty="还没有。老师说错了就在右边纠正它，它会记在这里。" />}
           <h3>老师笔记 · 所有歌</h3>
           {notes && <TeacherNotes scope="global" title={null} notes={notes.global} onChanged={reload} />}
           {notesError && <p className="small error-text">{notesError}</p>}
@@ -146,7 +189,7 @@ export function LearnMode({ title, annotations, doc, time, onPlayLine, onClearLo
       </section>
 
       <Splitter id="teacher-w" axis="x" target="next" min={240} max={0.55} />
-      <TeacherChat title={title} onNotesChanged={reload} />
+      <TeacherChat title={title} onNotesChanged={reloadAll} />
     </div>
   );
 }

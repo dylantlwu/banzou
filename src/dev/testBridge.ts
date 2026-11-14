@@ -10,6 +10,9 @@ export function installTestBridge() {
   let cb = 0;
   // ?test&nolib：模拟第一次打开（还没选素材文件夹），点「选择文件夹」后才有曲库
   let noLibrary = new URLSearchParams(location.search).has("nolib");
+  // ?test&emptylib：有素材文件夹但一首歌都没有；?test&firstrun：当作没看过新手导航（不改测试设置文件）
+  const emptyLibrary = new URLSearchParams(location.search).has("emptylib");
+  let firstRun = new URLSearchParams(location.search).has("firstrun");
   const fakeOutputs = installFakeOutputs();
   w.__TAURI_INTERNALS__ = {
     transformCallback: () => ++cb,
@@ -22,6 +25,11 @@ export function installTestBridge() {
       const res = await fetch(`/__bridge/${cmd}`, { method: "POST", body: JSON.stringify(args) });
       const data = (await res.json()) as { ok?: unknown; err?: string };
       if (data.err !== undefined) throw data.err;
+      if (emptyLibrary && cmd === "scan_library" && data.ok && typeof data.ok === "object") return { ...(data.ok as object), songs: [], unassigned: [] };
+      if (firstRun && cmd === "load_settings" && data.ok && typeof data.ok === "object") {
+        firstRun = false;
+        return { ...(data.ok as object), tourDone: false };
+      }
       return data.ok;
     },
   };

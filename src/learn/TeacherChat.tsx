@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Btn } from "../components/Btn";
+import { followMasterVolume } from "../audio/masterVolume";
+import { MarkedText } from "./MarkedText";
 import { type Remembered, SCOPE_NAME, type Turn, askTeacher, clearChat, loadChat, loadNotes, setNote, speakLine, undoRemember } from "./api";
 
 interface Props {
@@ -141,7 +143,7 @@ export function TeacherChat({ title, onNotesChanged }: Props) {
     try {
       const r = await speakLine(title, text);
       setSaid((s) => ({ ...s, [index]: r.said }));
-      const audio = new Audio(`data:audio/mpeg;base64,${r.audio}`);
+      const audio = followMasterVolume(new Audio(`data:audio/mpeg;base64,${r.audio}`));
       audioRef.current = audio;
       audio.onended = () => setSpeaking((s) => (s === index ? null : s));
       await audio.play();
@@ -219,7 +221,14 @@ export function TeacherChat({ title, onNotesChanged }: Props) {
             </div>
           ) : (
             <div key={i} className="msg t">
-              <div className="msg-text">{t.text}</div>
+              <div className="msg-text">
+                <MarkedText text={t.text} />
+              </div>
+              {t.fixes && t.fixes.length > 0 && (
+                <div className="muted small msg-fixes">
+                  按读音表改了：{t.fixes.map((f) => `${f.word} ${f.from} → ${f.to}`).join("；")}
+                </div>
+              )}
               {t.remembered?.map((r, j) => <RememberedCard key={j} title={title} r={r} onNotesChanged={onNotesChanged} />)}
               <Btn
                 className="link say"

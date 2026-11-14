@@ -87,8 +87,9 @@ export function CheckDialog({ open, songs, onClose, onEdit, onGoTo, onSeparate, 
       if (!saved?.address) throw new Error("还没连过电视：先在「电视」里连上一次");
       const st = await invoke<{ connected: boolean }>("tv_status", { addr: saved.address });
       if (!st.connected) throw new Error("电视没连上：打开电视、确认和电脑在同一个网络");
-      const r = await invoke<{ songs: number; newPreviews: number }>("tv_sync_catalog", { addr: saved.address });
-      return `电视歌单同步好了：${r.songs} 首，新做了 ${r.newPreviews} 个小 MV`;
+      const r = await invoke<{ songs: number; newPreviews: number; refreshed?: string[] }>("tv_sync_catalog", { addr: saved.address });
+      const up = r.refreshed?.length ? `；电视上已有的 ${r.refreshed.join("、")} 更新了歌词` : "";
+      return `电视歌单同步好了：${r.songs} 首，新做了 ${r.newPreviews} 个小 MV${up}`;
     });
 
   const fix = (s: SongState, f: Fix) => {

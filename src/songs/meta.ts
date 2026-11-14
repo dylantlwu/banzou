@@ -38,6 +38,8 @@ export interface CheckRow {
   tvPreview: "video" | "audio" | null;
   tvSynced: boolean;
   tvStale: boolean;
+  /** 整首歌已经在电视上，但电视上的歌词和电脑上的不一样（按上次同步记下的） */
+  tvLyricsStale: boolean;
 }
 
 export interface PlanItem {

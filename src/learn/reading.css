@@ -1,0 +1,191 @@
+/* 读音表和备课（PRD 4.12）：注音、待确认、改读音、课程 */
+
+/* 原文字距不变，注音浮在上面居中、可以伸出两边（不用 <ruby>，它会把汉字撑开）。整个词不折行 */
+.rv-word {
+  cursor: pointer;
+  border-radius: 4px;
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+  line-height: 1.15;
+}
+
+.rv-rt {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  line-height: 1;
+  font-size: 0.42em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+.rv-word:hover {
+  background: var(--hover);
+}
+
+/* 待确认：橙色虚线 + 读音带 ?，和跑调一样避开红绿 */
+.rv-pending {
+  text-decoration: underline dashed var(--accent);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 2px;
+}
+
+.rv-pending .rv-rt {
+  color: var(--accent);
+}
+
+.rv-picked {
+  background: var(--accent-soft);
+}
+
+.learn-reading-line {
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.rv-editor {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 520px;
+}
+
+.rv-editor-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rv-editor-word {
+  font-size: 18px;
+}
+
+.rv-close {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.rv-why {
+  color: var(--accent);
+}
+
+.rv-cands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rv-edit-row {
+  display: flex;
+  gap: 8px;
+}
+
+.rv-edit-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.lesson-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.lesson-dict {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.lesson-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lesson-summary {
+  line-height: 1.55;
+}
+
+.lesson-fixes ul {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+
+.lesson-review-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.rv-pending-btn {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.lesson-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lesson-meaning {
+  font-size: 16px;
+}
+
+.lesson-tip {
+  background: var(--hover);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.lesson-tip b {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+/* 老师说话里的 原文{读音}：注音比歌词那行大一点，行距留出注音的位置（注音浮在上一行的行距里） */
+.marked-text {
+  line-height: 2.1;
+}
+
+.marked-text .rv-word {
+  cursor: default;
+}
+
+.marked-text .rv-word[role="button"] {
+  cursor: pointer;
+}
+
+.marked-text .rv-rt {
+  font-size: 0.58em;
+}
+
+.msg-fixes {
+  margin-top: 4px;
+}

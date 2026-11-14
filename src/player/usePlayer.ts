@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AudioEngine, type TimelineEvent, type TrackRegion } from "../audio/engine";
+import { INITIAL_SWITCH, noteLoad, noteSong } from "./songSwitch";
 
 export interface PlayerTrack {
   id: string;
@@ -41,6 +42,8 @@ export interface Player {
   skip: (delta: number) => void;
   setRate: (rate: number) => void;
   setGain: (id: string, value: number) => void;
+  /** 总音量（耳朵听到的，0–1 增益） */
+  setVolume: (value: number) => void;
   hasTrack: (id: string) => boolean;
   getBuffer: (id: string) => AudioBuffer | null;
   /** 录音用：共用的 AudioContext 和时钟换算 */
@@ -62,9 +65,10 @@ export interface Player {
 
 /**
  * 播放器 hook：tracks 的文件路径变化时重新加载；音量变化不重新加载，用 setGain 调。
- * tracks 为 null 表示没有选歌；空数组表示这首歌没有可播放的音频。
+ * tracks 为 null 表示没有选歌（或音频还在处理）；空数组表示这首歌没有可播放的音频。
+ * songKey：现在是哪首歌。一变就马上停、清位置和 A-B，不等音频处理完；同一首歌换文件（变速、升降调、换 Take）保留位置和 A-B。
  */
-export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首歌没有伴奏文件"): Player {
+export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首歌没有伴奏文件", songKey?: string | null): Player {
   const engineRef = useRef<AudioEngine | null>(null);
   const engine = useCallback(() => (engineRef.current ??= new AudioEngine()), []);
   useEffect(
@@ -91,14 +95,29 @@ export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首�
   const loopRef = useRef(loop);
   loopRef.current = loop;
 
-  // 同一首歌只是换了 Take：保留播放位置和 A-B 循环；换歌才回到开头
-  const mainPathRef = useRef<string | null>(null);
+  // 换歌：马上停、清位置和 A-B（新歌的变速可能还在处理，音轨是 null，等不到加载那一步）。要写在加载的 effect 前面
+  const switchRef = useRef(INITIAL_SWITCH);
+  useEffect(() => {
+    const r = noteSong(switchRef.current, songKey);
+    switchRef.current = r.state;
+    if (!r.reset) return;
+    const e = engine();
+    if (e.transport.playing) e.pause();
+    setPlaying(false);
+    setPosition(0);
+    setDuration(0);
+    setLoop(null);
+    setLoad({ kind: "loading" });
+  }, [songKey, engine]);
+
+  // 同一首歌只是换了文件（变速、升降调、换 Take）：保留播放位置和 A-B 循环；换歌才回到开头
   useEffect(() => {
     if (key === null) return;
     const list = tracksRef.current ?? [];
     const mainPath = list[0]?.path ?? null;
-    const sameSong = mainPath !== null && mainPath === mainPathRef.current;
-    mainPathRef.current = mainPath;
+    const noted = noteLoad(switchRef.current, mainPath);
+    switchRef.current = noted.state;
+    const sameSong = noted.sameSong;
     const resumeAt = sameSong ? engine().transport.position() : 0;
     if (engine().transport.playing) engine().pause();
     setPlaying(false);
@@ -137,6 +156,8 @@ export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首�
     let raf = 0;
     const tick = () => {
       const e = engine();
+      // 已经停了（比如刚切歌）：别再把旧位置写回去
+      if (!e.transport.playing) return;
       if (e.transport.atEnd()) {
         e.pause();
         e.seek(0);
@@ -208,6 +229,7 @@ export function usePlayer(tracks: PlayerTrack[] | null, emptyMessage = "这首�
     skip,
     setRate,
     setGain: useCallback((id: string, v: number) => engine().setGain(id, v), [engine]),
+    setVolume: useCallback((v: number) => engine().setVolume(v), [engine]),
     hasTrack: useCallback((id: string) => engine().hasTrack(id), [engine]),
     getBuffer: useCallback((id: string) => engine().getBuffer(id), [engine]),
     context: useCallback(() => engine().context, [engine]),

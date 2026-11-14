@@ -30,6 +30,8 @@ export interface Turn {
   role: "me" | "teacher";
   text: string;
   remembered?: Remembered[];
+  /** 程序按读音表改掉的读音 */
+  fixes?: { place: string; word: string; from: string; to: string }[];
 }
 
 export interface Spoken {

@@ -23,9 +23,19 @@ fn test_tv(addr: &str) -> Result<String, String> {
     tv::test_mode_target(addr, std::env::var("BANZOU_TEST_TV").ok().as_deref())
 }
 
+/// 我的测试集放在素材上级的「测试集」（app/.testlib → 写歌/测试集），只在本机、不进仓库；BANZOU_TESTSET 可改
+fn testset_dir(root: &Path) -> PathBuf {
+    std::env::var_os("BANZOU_TESTSET").map(PathBuf::from).unwrap_or_else(|| {
+        let abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        abs.parent().and_then(Path::parent).unwrap_or(&abs).join("测试集")
+    })
+}
+
 fn run(root: &Path, cmd: &str, args: &Value) -> Result<Value, String> {
     let s = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_string);
     let settings_dir = root.join(".settings");
+    // 读音词典放测试曲库的 .tools/reading（和下载视频的工具同一个文件夹）
+    banzou_lib::learn::reading::set_tools_dir(video_dirs(root).tools);
     match cmd {
         "scan_library" => library::scan_dir(root)
             .map(|lib| serde_json::to_value(lib).unwrap())
@@ -87,8 +97,36 @@ fn run(root: &Path, cmd: &str, args: &Value) -> Result<Value, String> {
             let route = serde_json::from_value(args.get("route").cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
             banzou_lib::net::set_route(&settings_dir, &s("id").ok_or("缺少 id")?, route).map(|_| Value::Null)
         }
+        // 学唱：读音表、备课
+        "learn_reading_status" => Ok(serde_json::to_value(banzou_lib::learn::reading::dict_status(&video_dirs(root).tools)).unwrap()),
+        "learn_reading_install" => banzou_lib::learn::reading::install(&video_dirs(root)).map(|v| serde_json::to_value(v).unwrap()),
+        "learn_view" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?)
+            .and_then(|k| banzou_lib::learn::lesson::view(&settings_dir, root, &k))
+            .map(|v| serde_json::to_value(v).unwrap()),
+        "learn_readings" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?)
+            .and_then(|k| banzou_lib::learn::lesson::refresh_table(&settings_dir, root, &k))
+            .map(|v| serde_json::to_value(v).unwrap()),
+        "learn_save_reading" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?)
+            .and_then(|k| banzou_lib::learn::lesson::save_reading(&settings_dir, root, &k, &s("word").unwrap_or_default(), &s("reading").unwrap_or_default()))
+            .map(|v| serde_json::to_value(v).unwrap()),
+        "learn_prepare" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?)
+            .and_then(|k| banzou_lib::learn::lesson::prepare(&settings_dir, root, &k, &s("language").unwrap_or_else(|| banzou_lib::learn::teacher::DEFAULT_LANGUAGE.into())))
+            .map(|v| serde_json::to_value(v).unwrap()),
+        "learn_prepare_cancel" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?)
+            .map(|k| banzou_lib::learn::lesson::cancel_prepare(&settings_dir, &k))
+            .map(|_| Value::Null),
+        "learn_lesson" => banzou_lib::learn::lesson::song_key(root, &s("songId").ok_or("缺少 songId")?).map(|k| serde_json::to_value(banzou_lib::learn::lesson::load_lesson(root, &k)).unwrap()),
         "net_test" => banzou_lib::net::test(&settings_dir, &s("id").ok_or("缺少 id")?).map(|v| serde_json::to_value(v).unwrap()),
         "learn_speak" =>banzou_lib::learn::teacher::speak(&settings_dir, root, s("title").as_deref(), &s("text").unwrap_or_default()).map(|v| serde_json::to_value(v).unwrap()),
+        // 我的测试集录音（PRD 4.12）
+        "testset_load" => banzou_lib::learn::testset::load(&testset_dir(root)),
+        "testset_save" => {
+            let info = serde_json::from_value(args.get("info").cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
+            banzou_lib::learn::testset::save(&testset_dir(root), &s("id").unwrap_or_default(), &s("wav").unwrap_or_default(), &info).map(|r| serde_json::to_value(r).unwrap())
+        }
+        "testset_skip" => banzou_lib::learn::testset::skip(&testset_dir(root), &s("id").unwrap_or_default(), args.get("skip").and_then(Value::as_bool).unwrap_or(true))
+            .map(|r| serde_json::to_value(r).unwrap()),
+        "testset_audio" => banzou_lib::learn::testset::audio(&testset_dir(root), &s("id").unwrap_or_default()).map(Value::from),
         "load_settings" => settings::load(&settings_dir).map_err(|e| format!("读取设置失败：{e}")),
         "save_settings" => settings::save(&settings_dir, args.get("value").unwrap_or(&Value::Null))
             .map(|_| Value::Null)

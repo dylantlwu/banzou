@@ -1,0 +1,74 @@
+/* 第一次使用的导航（PRD 4.0.1）：颜色都用 App.css 的变量，深浅色自动跟 */
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.tour-block {
+  position: absolute;
+  pointer-events: auto;
+}
+
+/* 没有要框的东西时整页压暗 */
+.tour-block.dim {
+  background: rgb(0 0 0 / 0.5);
+}
+
+/* 聚光灯：框外压暗，框里是真实界面 */
+.tour-spot {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 0 200vmax rgb(0 0 0 / 0.5);
+  pointer-events: none;
+  transition:
+    left 0.2s ease,
+    top 0.2s ease,
+    width 0.2s ease,
+    height 0.2s ease;
+}
+
+.tour-card {
+  position: absolute;
+  width: min(300px, calc(100vw - 24px));
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
+  transition:
+    left 0.2s ease,
+    top 0.2s ease;
+}
+
+.tour-card h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.tour-card p {
+  margin: 0;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.tour-grow {
+  flex: 1;
+}

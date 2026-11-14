@@ -815,10 +815,10 @@
   overflow: hidden;
 }
 
-/* 这一句那块：笔记拉高时它变矮，内容多了自己滚 */
+/* 这一句那块：笔记拉高时它变矮，内容多了自己滚；至少留四成高，句子、意思、难点、「放这一句」不被下面盖住 */
 .learn-focus {
   flex: 1;
-  min-height: 60px;
+  min-height: 40%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -829,8 +829,9 @@
   font-size: 30px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  line-height: 1.4;
-  margin-top: 8px;
+  /* 注音浮在字上面，行距要留出它的高度（折行时也不压到上一行） */
+  line-height: 1.95;
+  margin-top: 4px;
 }
 
 .learn-act {
@@ -850,9 +851,10 @@
   border-top: 1px solid var(--line);
   padding-top: 14px;
   flex: none;
-  height: var(--learn-notes-h, auto);
+  /* 备课、待确认、笔记默认占四成，最多六成，多了自己滚 */
+  height: var(--learn-notes-h, 40%);
   min-height: 60px;
-  max-height: 85%;
+  max-height: 60%;
   overflow-y: auto;
 }
 
@@ -1078,4 +1080,48 @@ body.resizing-y * {
   width: var(--practice-list-w, 210px);
   min-width: 150px;
   max-width: 45%;
+}
+
+/* ---------- 播放栏：总音量 ---------- */
+
+.vol {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.vol-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+}
+
+.vol-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.vol-btn.off {
+  color: var(--muted);
+}
+
+.vol-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.vol input[type="range"] {
+  width: 84px;
+  accent-color: var(--accent);
+}
+
+.vol input[type="range"]:focus:not(:focus-visible) {
+  outline: none;
 }

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { TeacherNotes } from "../learn/TeacherNotes";
 import { type Note as TeacherNote, loadNotes } from "../learn/api";
+import { followMasterVolume } from "../audio/masterVolume";
 import { Btn } from "./Btn";
 
 /** 后端 ai::AiStatus：key 只给末四位 */
@@ -128,7 +129,7 @@ export function AiSettings() {
     setVoiceNote({ text: "正在合成…", busy: true });
     try {
       const r = await invoke<{ audio: string; bytes: number; ms: number }>("ai_test_tts", { text: SAMPLE_LINE });
-      const audio = new Audio(`data:audio/mpeg;base64,${r.audio}`);
+      const audio = followMasterVolume(new Audio(`data:audio/mpeg;base64,${r.audio}`));
       audioRef.current = audio;
       setVoiceNote({ text: `合成用了 ${secs(r.ms)}，正在播放：${SAMPLE_LINE}` });
       await audio.play();

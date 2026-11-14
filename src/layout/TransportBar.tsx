@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { Btn } from "../components/Btn";
 import { formatTime } from "../utils/time";
 import { Popover } from "./Popover";
+import { type VolumeProps, VolumeControl } from "./VolumeControl";
 
 const SKIP_SECONDS = 5;
 export const SPEEDS = [0.5, 0.6, 0.75, 0.9, 1, 1.1, 1.25, 1.5];
@@ -53,6 +54,8 @@ interface Props {
   vocal: { on: boolean; disabled: boolean; label: string; title: string; onToggle: () => void } | null;
   speed: { value: number; disabled: boolean; onChange: (v: number) => void } | null;
   sound: SoundProps | null;
+  /** 总音量（喇叭 + 滑杆），所有模式都有 */
+  volume?: VolumeProps;
   /** 播放栏下面一行小字（加载中、出错、文件名……） */
   status?: ReactNode;
 }
@@ -126,6 +129,7 @@ export function TransportBar(p: Props) {
         </div>
 
         <div className="tbar-knobs">
+          {p.volume && <VolumeControl {...p.volume} />}
           {p.vocal && (
             <Btn className={p.vocal.on ? "pill on" : "pill"} onClick={p.vocal.onToggle} disabled={p.vocal.disabled} title={p.vocal.title}>
               {p.vocal.label}

@@ -10,6 +10,12 @@ async function start() {
     installTestBridge();
     if (new URLSearchParams(location.search).has("fakemic")) installFakeMic();
   }
+  // 录我的测试集（PRD 4.12）：?test&testset，只在测试模式里
+  if ("__BANZOU_TEST__" in window && new URLSearchParams(location.search).has("testset")) {
+    const { TestSetRecorder } = await import("./testset/TestSetRecorder");
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<TestSetRecorder />);
+    return;
+  }
   void import("./selftest").then((m) => m.runSelftestIfEnabled());
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>

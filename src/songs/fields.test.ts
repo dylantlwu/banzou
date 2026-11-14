@@ -30,6 +30,7 @@ function state(over: Partial<Song> = {}, row: Partial<CheckRow> = {}) {
     tvPreview: "video",
     tvSynced: true,
     tvStale: false,
+    tvLyricsStale: false,
     ...row,
   };
   return { song, row: r };
@@ -82,4 +83,10 @@ it("显示名：资料表的 title 优先，没有用文件名", () => {
   expect(songName({ title: "AB", meta: null })).toBe("AB");
   expect(songName({ title: "AB", meta: { schema: 1, id: "1", key: "AB", title: " 夏天 " } })).toBe("夏天");
   expect(songName({ title: "AB", meta: { schema: 1, id: "1", key: "AB", title: " " } })).toBe("AB");
+});
+
+it("电视上的歌词旧了：提示同步电视", () => {
+  const g = gaps(state({}, { tvLyricsStale: true }));
+  expect(g.map((x) => x.def.key)).toEqual(["tvLyrics"]);
+  expect(g[0].fix).toEqual(["tvSync"]);
 });

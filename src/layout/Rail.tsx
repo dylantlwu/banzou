@@ -58,6 +58,7 @@ export function Rail({ active, onGo, busy = {}, disabled = {} }: Props) {
   const item = (p: Place) => (
     <Btn
       key={p}
+      data-place={p}
       className={active === p ? "place on" : "place"}
       onClick={() => onGo(p)}
       disabled={disabled[p]}

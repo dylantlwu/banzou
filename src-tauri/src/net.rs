@@ -9,10 +9,35 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
+use std::collections::HashMap;
 use std::process::Command;
-use std::time::Instant;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 const FILE: &str = "network.json";
+/// 直连不通（比如 VPN 换了模式、拦住了不进隧道的流量）后，这么久之内先不再试直连，直接跟系统走
+const DIRECT_RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
+
+/// 最近一次直连不通的时间，按域名记（只在内存里，重开应用就清掉）
+static DIRECT_FAILED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+
+/// 记下直连通没通：不通就先别再试，通了就清掉
+pub fn note_direct(url: &str, ok: bool) {
+    let host = host_of(url).to_ascii_lowercase();
+    let mut map = DIRECT_FAILED.lock().unwrap_or_else(|e| e.into_inner());
+    let map = map.get_or_insert_with(HashMap::new);
+    if ok {
+        map.remove(&host);
+    } else {
+        map.insert(host, Instant::now());
+    }
+}
+
+fn direct_failed_recently(url: &str) -> bool {
+    let host = host_of(url).to_ascii_lowercase();
+    let map = DIRECT_FAILED.lock().unwrap_or_else(|e| e.into_inner());
+    map.as_ref().and_then(|m| m.get(&host)).is_some_and(|t| t.elapsed() < DIRECT_RETRY_AFTER)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -126,9 +151,12 @@ pub fn physical_interface() -> Option<String> {
     (!iface.is_empty() && !iface.starts_with("utun") && iface.chars().all(|c| c.is_ascii_alphanumeric())).then_some(iface)
 }
 
-/// 要直连时返回网卡名，交给 curl 的 --interface；跟系统走返回 None
+/// 要直连时返回网卡名，交给 curl 的 --interface；跟系统走（或刚才直连不通）返回 None
 pub fn direct_interface(dir: &Path, url: &str) -> Option<String> {
-    (route_for(dir, url) == Route::Direct).then(physical_interface).flatten()
+    if route_for(dir, url) != Route::Direct || direct_failed_recently(url) {
+        return None;
+    }
+    physical_interface()
 }
 
 /// curl 要加的参数（直连时 `--interface en1`），给其他用 curl 的地方用
@@ -190,6 +218,9 @@ pub fn test(dir: &Path, id: &str) -> Result<TestResult, String> {
         return Ok(TestResult { id: id.into(), ok, via: Route::System, ms, fell_back: true, error: error.or(Some("找不到 Wi-Fi / 网线网卡".into())) });
     }
     let (ok, ms, error) = probe(def.url, iface.as_deref());
+    if iface.is_some() {
+        note_direct(def.url, ok);
+    }
     if ok || iface.is_none() {
         return Ok(TestResult { id: id.into(), ok, via: route, ms, fell_back: false, error });
     }
@@ -227,6 +258,16 @@ mod tests {
         set_route(dir.path(), "claude", None).unwrap();
         assert_eq!(route_for(dir.path(), "https://api.anthropic.com"), Route::System);
         assert!(set_route(dir.path(), "nope", None).is_err());
+    }
+
+    #[test]
+    fn failed_direct_is_skipped_for_a_while() {
+        let dir = tempfile::tempdir().unwrap();
+        let url = "https://test-only.volces.com/x";
+        note_direct(url, false);
+        assert_eq!(direct_interface(dir.path(), url), None);
+        note_direct(url, true);
+        assert!(!direct_failed_recently(url));
     }
 
     #[test]

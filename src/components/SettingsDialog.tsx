@@ -29,9 +29,11 @@ interface Props {
   libraryRoot: string | null;
   onChooseLibrary: () => void;
   onUpdateFound: (update: UpdateInfo) => void;
+  /** 关于 →「再看一次新手导航」（PRD 4.0.1） */
+  onReplayTour?: () => void;
 }
 
-export function SettingsDialog({ initialTab = "general", settings, onChange, onClose, libraryRoot, onChooseLibrary, onUpdateFound }: Props) {
+export function SettingsDialog({ initialTab = "general", settings, onChange, onClose, libraryRoot, onChooseLibrary, onUpdateFound, onReplayTour }: Props) {
   const [calibrating, setCalibrating] = useState(false);
   const [tab, setTab] = useState<SettingsTab>(initialTab);
   const [version, setVersion] = useState("");
@@ -155,6 +157,16 @@ export function SettingsDialog({ initialTab = "general", settings, onChange, onC
                 {checkState.text && <span className={checkState.error ? "small error-text" : "muted small"}>{checkState.text}</span>}
               </div>
             </div>
+            )}
+            {tab === "about" && onReplayTour && (
+              <div className="field">
+                <label>新手导航</label>
+                <div className="field-row">
+                  <Btn className="ghost" onClick={onReplayTour}>
+                    再看一次新手导航
+                  </Btn>
+                </div>
+              </div>
             )}
 
             <div className="dialog-actions">

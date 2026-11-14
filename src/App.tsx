@@ -45,6 +45,9 @@ import { CornerToggles, type SongMode, SongHeader } from "./layout/SongHeader";
 import { TransportBar } from "./layout/TransportBar";
 import { TunePicker } from "./layout/TunePicker";
 import { useAutoRescan } from "./layout/useAutoRescan";
+import { setMasterGain, volumeGain } from "./audio/masterVolume";
+import { Tour } from "./layout/Tour";
+import { type TourKind, type TourStep, tourSteps } from "./layout/tourSteps";
 import { Splitter } from "./layout/split";
 import "./App.css";
 import "./layout/layout.css";
@@ -94,8 +97,10 @@ export default function App() {
       .catch((e) => console.error(e))
       .finally(() => {
         settingsLoaded.current = true;
+        setSettingsReady(true);
       });
   }, []);
+  const [settingsReady, setSettingsReady] = useState(false);
   useEffect(() => {
     if (!settingsLoaded.current) return;
     const id = window.setTimeout(() => void saveSettings(settings).catch((e) => console.error(e)), 400);
@@ -335,7 +340,8 @@ export default function App() {
   // ---------- 播放 ----------
   // 选中录音时 V 的含义变成「我的声音 ↔ 原唱」对比；没选录音时是引导人声开关
   const solo = mode === "learn" && learnSolo && !!selected?.vocals[0];
-  const vocalGain = playTake ? (vocalOn ? 1 : 0) : solo ? 1 : vocalOn ? settings.vocalGuideVolume : 0;
+  // 只放人声时人声音量照样按「声音 ▾」里的人声滑杆走
+  const vocalGain = playTake ? (vocalOn ? 1 : 0) : solo ? settings.vocalGuideVolume : vocalOn ? settings.vocalGuideVolume : 0;
   const accGain = solo ? 0 : settings.accompanimentVolume;
   const takeGain = playTake && !vocalOn ? settings.myVoiceVolume : 0;
   const tracks = useMemo<PlayerTrack[] | null>(() => {
@@ -353,8 +359,18 @@ export default function App() {
     // 音量变化不重新加载（由下面的 setGain 调），这里只关心文件和位置
   }, [selected, source, playTake, takesApi.dir, mode, tuneVoice, transposing, shifted]);
 
-  const player = usePlayer(tracks);
+  // 哪首歌 + 哪个音源：一变播放器就马上清位置和 A-B（不等变速处理完）
+  const playerSong = selected ? `${selected.id}|${source?.file.path ?? ""}` : null;
+  const player = usePlayer(tracks, undefined, playerSong);
   const { setGain, seekTo, skip, togglePlay, ready } = player;
+
+  // 总音量（播放栏的喇叭）：歌曲走引擎的总音量节点，老师说话跟着同一个值
+  const masterGainValue = volumeGain(settings.masterVolume, settings.masterMuted);
+  const { setVolume: setPlayerVolume } = player;
+  useEffect(() => {
+    setPlayerVolume(masterGainValue);
+    setMasterGain(masterGainValue);
+  }, [masterGainValue, setPlayerVolume]);
 
   // 修音页：V 在「我的声音」和「原唱」之间切换
   useEffect(() => {
@@ -733,6 +749,37 @@ export default function App() {
       setLibOpen(true);
     } else setLibOpen((o) => !o);
   };
+  // ---------- 新手导航（PRD 4.0.1）：没看过就在曲库扫完后自动出现 ----------
+  const [tour, setTour] = useState<{ kind: TourKind; steps: TourStep[] } | null>(null);
+  const tourAutoRef = useRef(false);
+  const tourKind: TourKind = needLibrary ? "nolib" : !library || library.songs.length === 0 ? "empty" : "full";
+  const startTour = useCallback(() => setTour({ kind: tourKind, steps: tourSteps(tourKind) }), [tourKind]);
+  // 导航走到一半选好了文件夹 / 加进了第一首歌：换成完整的导航，从头讲
+  useEffect(() => {
+    if (tour && tour.kind !== "full" && tourKind === "full") setTour({ kind: "full", steps: tourSteps("full") });
+  }, [tour, tourKind]);
+  useEffect(() => {
+    if (tourAutoRef.current || !settingsReady || settings.tourDone || (!library && !needLibrary)) return;
+    tourAutoRef.current = true;
+    startTour();
+  }, [settingsReady, settings.tourDone, library, needLibrary, startTour]);
+  const prepareTour = (step: TourStep) => {
+    if (!step.needs) return;
+    if (mode === "practice") setMode("sing");
+    setLibOpen(true);
+    if (step.needs !== "song" || recBusy) return;
+    // 讲歌词、播放栏时要有一首歌：没选就选第一首有歌词的
+    if (!selected) {
+      const first = library?.songs.find((s) => s.lyrics) ?? library?.songs[0];
+      if (first) selectSong(first.id);
+    }
+    if (mode !== "sing" && mode !== "record") goMode("sing");
+  };
+  const closeTour = () => {
+    setTour(null);
+    if (!settings.tourDone) updateSettings({ tourDone: true });
+  };
+
   const liveBusy = goLive.phase === "live" || goLive.obs?.streaming ? "推流中" : settings.liveEnabled ? "歌词同步中" : null;
 
   const artistLine = selected ? [displayArtist(tagsOf(selected), selected.artist), langEraLine(tagsOf(selected))].filter(Boolean).join(" · ") || null : null;
@@ -895,6 +942,7 @@ export default function App() {
             ) : mode === "learn" ? (
               <LearnMode
                 title={selected.title}
+                songId={selected.songId}
                 annotations={selected.originals.map((f) => f.fileName.replace(/\.[^.]+$/, ""))}
                 doc={lyricsDoc}
                 time={heard}
@@ -1046,8 +1094,8 @@ export default function App() {
                       source?.kind === "accompaniment" && !playTake
                         ? {
                             value: settings.vocalGuideVolume,
-                            disabled: !hasVocal || solo,
-                            title: "引导人声音量",
+                            disabled: !hasVocal,
+                            title: solo ? "只放人声时的人声音量" : "引导人声音量",
                             onChange: (v) => {
                               updateSettings({ vocalGuideVolume: v });
                               setVocalOn(true);
@@ -1058,6 +1106,12 @@ export default function App() {
                   }
                 : null
             }
+            volume={{
+              value: settings.masterVolume,
+              muted: settings.masterMuted,
+              onChange: (v) => updateSettings({ masterVolume: v, masterMuted: false }),
+              onToggleMute: () => updateSettings(settings.masterMuted || settings.masterVolume === 0 ? { masterMuted: false, masterVolume: settings.masterVolume || 0.6 } : { masterMuted: true }),
+            }}
             status={hasStatus ? statusText : undefined}
           />
         )}
@@ -1076,6 +1130,10 @@ export default function App() {
           onUpdateFound={(u) => {
             setSettingsOpen(false);
             setUpdate(u);
+          }}
+          onReplayTour={() => {
+            setSettingsOpen(false);
+            startTour();
           }}
         />
       )}
@@ -1099,6 +1157,7 @@ export default function App() {
         onChanged={() => void scan().then(() => loadTags().then(setTags).catch(() => {}))}
       />
       <SongInfoDialog song={infoSong} onClose={() => setInfoSong(null)} onSaved={() => void scan().then(() => loadTags().then(setTags).catch(() => {}))} onRenamed={onSongRenamed} />
+      {tour && <Tour key={tour.kind} steps={tour.steps} onPrepare={prepareTour} onClose={closeTour} />}
       {update && <UpdateCard key={update.version} update={update} onClose={() => setUpdate(null)} />}
     </div>
   );

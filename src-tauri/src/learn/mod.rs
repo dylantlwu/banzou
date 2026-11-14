@@ -1,6 +1,11 @@
-//! 外语学唱（PRD 4.12）：老师笔记、问老师。备课、一句一循环、语音识别以后加在这里
+//! 外语学唱（PRD 4.12）：老师笔记、读音表、备课、问老师。一句一循环、语音识别以后加在这里
+pub mod lesson;
+pub mod marked;
 pub mod notes;
+pub mod reading;
+pub mod speech;
 pub mod teacher;
+pub mod testset;
 
 use serde::Serialize;
 use std::path::Path;

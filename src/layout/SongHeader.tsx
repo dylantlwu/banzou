@@ -149,6 +149,7 @@ export function SongHeader({ title, subtitle, subtitleTip, mode, onMode, modeBlo
         {MODES.map(([m, label]) => (
           <Btn
             key={m}
+            data-mode={m}
             role="tab"
             aria-selected={mode === m}
             className={mode === m ? "seg active" : "seg"}

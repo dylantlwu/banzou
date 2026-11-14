@@ -645,6 +645,73 @@ async fn net_test(app: tauri::AppHandle, id: String) -> Result<net::TestResult, 
     tauri::async_runtime::spawn_blocking(move || net::test(&dir, &id)).await.map_err(|e| e.to_string())?
 }
 
+/// 学唱：读音词典装没装（两个日语分析器的词典，第一次用时下载）
+#[tauri::command]
+fn learn_reading_status(app: tauri::AppHandle) -> Result<learn::reading::DictStatus, String> {
+    Ok(learn::reading::dict_status(&video_dirs(&app)?.tools))
+}
+
+/// 学唱：下载并装好读音词典（约 220 MB），进度看 video_job
+#[tauri::command]
+async fn learn_reading_install(app: tauri::AppHandle) -> Result<learn::reading::DictStatus, String> {
+    let dirs = video_dirs(&app)?;
+    tauri::async_runtime::spawn_blocking(move || learn::reading::install(&dirs)).await.map_err(|e| e.to_string())?
+}
+
+/// 学唱页要的全部：歌词（按句）、读音表（重算）、课程、词典状态
+#[tauri::command]
+async fn learn_view(app: tauri::AppHandle, song_id: String) -> Result<learn::lesson::LearnView, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = learn::lesson::song_key(&root, &song_id)?;
+        learn::lesson::view(&config, &root, &key)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 学唱：这首歌的读音表（按现在的歌词、笔记、标注重算后返回）
+#[tauri::command]
+async fn learn_readings(app: tauri::AppHandle, song_id: String) -> Result<learn::reading::Table, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || learn::lesson::refresh_table(&config, &root, &learn::lesson::song_key(&root, &song_id)?)).await.map_err(|e| e.to_string())?
+}
+
+/// 学唱：确认 / 改一个读音（同时记进这首歌的笔记）
+#[tauri::command]
+async fn learn_save_reading(app: tauri::AppHandle, song_id: String, word: String, reading: String) -> Result<learn::reading::Table, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    tauri::async_runtime::spawn_blocking(move || learn::lesson::save_reading(&config, &root, &learn::lesson::song_key(&root, &song_id)?, &word, &reading)).await.map_err(|e| e.to_string())?
+}
+
+/// 学唱：备课（读音表 → Claude → 按表核对），存 `<歌名>.lesson.json`
+#[tauri::command]
+async fn learn_prepare(app: tauri::AppHandle, song_id: String, language: Option<String>) -> Result<learn::lesson::Lesson, String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    let language = language.unwrap_or_else(|| learn::teacher::DEFAULT_LANGUAGE.to_string());
+    tauri::async_runtime::spawn_blocking(move || learn::lesson::prepare(&config, &root, &learn::lesson::song_key(&root, &song_id)?, &language)).await.map_err(|e| e.to_string())?
+}
+
+/// 学唱：取消正在进行的备课（回来的结果不存，原来的课程保留）
+#[tauri::command]
+fn learn_prepare_cancel(app: tauri::AppHandle, song_id: String) -> Result<(), String> {
+    let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = default_library_dir()?;
+    learn::lesson::cancel_prepare(&config, &learn::lesson::song_key(&root, &song_id)?);
+    Ok(())
+}
+
+/// 学唱：读课程（没备过课是 null）
+#[tauri::command]
+fn learn_lesson(song_id: String) -> Result<Option<learn::lesson::Lesson>, String> {
+    let root = default_library_dir()?;
+    Ok(learn::lesson::load_lesson(&root, &learn::lesson::song_key(&root, &song_id)?))
+}
+
 /// 给歌打标签（联网查资料）。retag=false 只打还缺标签的歌；retag=true 重打全部，但手动改过的字段不动。
 /// 用户手动改过的歌最多 20 首当范例一起发给 AI。返回本次猜了几首
 #[tauri::command]
@@ -815,6 +882,14 @@ pub fn run() {
             net_services,
             net_set_route,
             net_test,
+            learn_reading_status,
+            learn_reading_install,
+            learn_view,
+            learn_readings,
+            learn_save_reading,
+            learn_prepare,
+            learn_prepare_cancel,
+            learn_lesson,
             tv_job,
             tv_cancel,
             song_meta

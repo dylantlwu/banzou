@@ -648,6 +648,8 @@ pub fn push(dirs: &Dirs, addr: &str, req: &PushRequest) -> Result<Pushed, String
         }
         shell(dirs, &addr, &format!("rm -rf {r}; mv {p} {r}", r = sh_quote(&remote), p = sh_quote(&partial)))?;
         let free = shell(dirs, &addr, "df /sdcard").ok().and_then(|t| parse_df_free(&t));
+        let print = req.lyrics.as_ref().and_then(|l| fs::read_to_string(l).ok()).map(|t| lyrics_print(&t)).unwrap_or_default();
+        note_on_tv(dirs, &[(req.id.clone().filter(|i| !i.is_empty()).unwrap_or_else(|| song_id(&req.title)), print)]);
         Ok(Pushed { title: req.title.clone(), size, video: req.video.is_some(), free_bytes: free })
     })();
     if result.is_err() {
@@ -779,6 +781,88 @@ pub fn chorus_start(lyrics: Option<&str>, duration: f64) -> f64 {
 pub struct Synced {
     pub songs: usize,
     pub new_previews: usize,
+    /// 已经在电视上的整首歌里，歌词或 info.json 跟着更新了的（显示名）
+    pub refreshed: Vec<String>,
+}
+
+/// 记在电脑上的「电视上每首整首歌的歌词是哪一版」：{ 编号: 歌词指纹 或 "" }（资料检查用来看电视上的歌词旧没旧）
+pub const ON_TV_FILE: &str = "on-tv.json";
+
+/// 歌词的指纹（去掉 BOM 和 \r、首尾空白；adb shell 读回来的会丢 \r）
+pub fn lyrics_print(text: &str) -> String {
+    song_id(text.trim_start_matches('\u{feff}').replace('\r', "").trim())
+}
+
+fn note_on_tv(dirs: &Dirs, updates: &[(String, String)]) {
+    let path = dirs.work.join(ON_TV_FILE);
+    let mut map: serde_json::Map<String, serde_json::Value> = fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    for (id, print) in updates {
+        map.insert(id.clone(), print.clone().into());
+    }
+    let _ = fs::create_dir_all(&dirs.work);
+    let _ = fs::write(&path, serde_json::to_vec(&map).unwrap_or_default());
+}
+
+/// 已经传到电视上的整首歌：歌词（lyrics.lrc）和 info.json（编号、显示名）跟着电脑更新，视频不重传。
+/// 以前只在第一次传整首时带过去，电脑上后来补的歌词电视上一直没有。返回更新了的歌（显示名）
+fn refresh_pushed(dirs: &Dirs, addr: &str, songs: &[CatalogSong]) -> Result<Vec<String>, String> {
+    let folders: Vec<String> = shell(dirs, addr, &format!("ls {REMOTE_ROOT}"))?.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty() && !l.starts_with('.')).collect();
+    let tmp_dir = dirs.work.join("refresh");
+    fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let put = |local: &Path, remote: &str| -> Result<(), String> {
+        adb(dirs, &["-s", addr, "push", &local.to_string_lossy(), &format!("{remote}.tmp")], Duration::from_secs(60))?;
+        shell(dirs, addr, &format!("mv {} {}", sh_quote(&format!("{remote}.tmp")), sh_quote(remote))).map(|_| ())
+    };
+    let mut refreshed = Vec::new();
+    let mut seen = Vec::new();
+    for song in songs {
+        if !folders.iter().any(|f| f == song.title.trim()) {
+            continue;
+        }
+        let remote = remote_dir(&song.title)?;
+        let mut changed = false;
+        // 歌词：电脑上有、和电视上的不一样就换（电脑上没有的不删电视上的）
+        let on_tv = shell(dirs, addr, &format!("cat {} 2>/dev/null", sh_quote(&format!("{remote}/lyrics.lrc")))).unwrap_or_default();
+        let mut tv_print = if on_tv.trim().is_empty() { String::new() } else { lyrics_print(&on_tv) };
+        if let Some(l) = &song.lyrics
+            && let Ok(text) = fs::read_to_string(l)
+            && lyrics_print(&text) != tv_print
+        {
+            let tmp = tmp_dir.join("lyrics.lrc");
+            fs::copy(l, &tmp).map_err(|e| format!("读不了歌词：{e}"))?;
+            put(&tmp, &format!("{remote}/lyrics.lrc"))?;
+            tv_print = lyrics_print(&text);
+            changed = true;
+        }
+        // info.json：补上稳定编号和显示名（老的传输没有）
+        if let Ok(mut info) = serde_json::from_str::<serde_json::Value>(&shell(dirs, addr, &format!("cat {}", sh_quote(&format!("{remote}/info.json"))))?)
+            && info.is_object()
+        {
+            let id = song.stable_id();
+            let name = song.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+            if info.get("id").and_then(|v| v.as_str()) != Some(id.as_str()) || info.get("name").and_then(|v| v.as_str()) != name {
+                info["id"] = id.into();
+                match name {
+                    Some(n) => info["name"] = n.into(),
+                    None => {
+                        info.as_object_mut().map(|o| o.remove("name"));
+                    }
+                }
+                let tmp = tmp_dir.join("info.json");
+                fs::write(&tmp, serde_json::to_vec(&info).unwrap_or_default()).map_err(|e| e.to_string())?;
+                put(&tmp, &format!("{remote}/info.json"))?;
+                changed = true;
+            }
+        }
+        seen.push((song.stable_id(), tv_print));
+        if changed {
+            refreshed.push(song.shown().to_string());
+        }
+    }
+    // 记下电视上现在有哪些整首、歌词是哪一版；不在电视上的从记录里去掉
+    let _ = fs::write(dirs.work.join(ON_TV_FILE), serde_json::to_vec(&seen.iter().map(|(k, v)| (k.clone(), serde_json::Value::from(v.clone()))).collect::<serde_json::Map<String, serde_json::Value>>()).unwrap_or_default());
+    let _ = fs::remove_dir_all(&tmp_dir);
+    Ok(refreshed)
 }
 
 /// 把全部歌曲的歌单和副歌预览同步到电视（已有的预览不重做、不重传）
@@ -862,7 +946,11 @@ pub fn sync_catalog(dirs: &Dirs, addr: &str, songs: &[CatalogSong], tags: &serde
         }
         // 电视上记的点歌次数拉回电脑（「常点」），拉不到就算了
         let _ = adb(dirs, &["-s", &addr, "pull", &format!("{CATALOG_DIR}/plays.json"), &plays_out.to_string_lossy()], Duration::from_secs(20));
-        Ok(Synced { songs: entries.len(), new_previews })
+        // 已经在电视上的整首歌：歌词和 info.json 跟着更新
+        job.text = "更新电视上的歌词".into();
+        video::write_job(dirs, &job);
+        let refreshed = refresh_pushed(dirs, &addr, songs)?;
+        Ok(Synced { songs: entries.len(), new_previews, refreshed })
     })();
     video::finish(dirs, &mut job);
     result
@@ -980,6 +1068,12 @@ pub fn remove(dirs: &Dirs, addr: &str, title: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lyrics_print_ignores_cr_bom_and_edges() {
+        assert_eq!(lyrics_print("\u{feff}[00:01.00]a\r\n[00:02.00]b\r\n"), lyrics_print("[00:01.00]a\n[00:02.00]b"));
+        assert_ne!(lyrics_print("[00:01.00]a"), lyrics_print("[00:01.00]b"));
+    }
 
     #[test]
     fn song_initials() {

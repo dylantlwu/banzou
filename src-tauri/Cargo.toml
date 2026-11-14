@@ -35,6 +35,11 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 fast2s = "0.3.1"
 pinyin = "0.11"
+# 外语学唱的读音表（PRD 4.12）：两个日语分析器交叉比对，词典第一次用时下载（MIT / Apache-2.0；UniDic 选 BSD）
+lindera = "6.2.0"
+lindera-dictionary = "6.2.0"
+sudachi = { git = "https://github.com/WorksApplications/sudachi.rs", tag = "v0.7.0" }
+wana_kana = "5"
 
 [dev-dependencies]
 tempfile = "3"

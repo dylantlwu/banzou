@@ -127,6 +127,18 @@ export const FIELDS: FieldDef[] = [
     has: (s) => s.row.tvSynced && !s.row.tvStale,
     neededWhen: (s) => s.song.accompaniments.length > 0,
   },
+  {
+    key: "tvLyrics",
+    label: "电视上的歌词",
+    missing: "电视上的歌词是旧的",
+    where: "tv",
+    filledBy: ["tool"],
+    required: [],
+    helps: ["tv"],
+    fix: ["tvSync"],
+    hint: "整首歌只在第一次传到电视时带上歌词；同步电视歌单时会把电视上已有的歌的歌词换成电脑上的",
+    has: (s) => !s.row.tvLyricsStale,
+  },
 ];
 
 export const SHEET_FIELDS = FIELDS.filter((f) => f.where === "sheet");

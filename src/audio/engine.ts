@@ -58,6 +58,9 @@ export class AudioEngine {
   private readonly cache = new Map<string, AudioBuffer>();
   private recentUrls: string[][] = [];
   private master: GainNode;
+  /** 总音量（播放栏的喇叭）：接在 master 后面，只管耳朵听到的；直播从 master 取声音，不受它影响 */
+  private volume: GainNode;
+  private volumeValue = 1;
   /** 分组效果链（修音页给人声加效果）：组名 → 搭链函数 */
   private readonly chainFactories = new Map<string, (ctx: BaseAudioContext) => { input: AudioNode; output: AudioNode }>();
   private readonly chains = new Map<string, { input: AudioNode; output: AudioNode }>();
@@ -66,7 +69,15 @@ export class AudioEngine {
 
   constructor() {
     this.master = this.ctx.createGain();
-    this.master.connect(this.ctx.destination);
+    this.volume = this.ctx.createGain();
+    this.master.connect(this.volume);
+    this.volume.connect(this.ctx.destination);
+  }
+
+  /** 总音量 0–1（已经按听感换算好的增益） */
+  setVolume(value: number): void {
+    this.volumeValue = Math.min(1, Math.max(0, value));
+    this.volume.gain.setTargetAtTime(this.volumeValue, this.ctx.currentTime, 0.01);
   }
 
   get context(): AudioContext {
@@ -322,7 +333,10 @@ export class AudioEngine {
     const old = this.ctx;
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
-    this.master.connect(this.ctx.destination);
+    this.volume = this.ctx.createGain();
+    this.volume.gain.value = this.volumeValue;
+    this.master.connect(this.volume);
+    this.volume.connect(this.ctx.destination);
     this.chains.clear();
     for (const [group, factory] of this.chainFactories) {
       const chain = factory(this.ctx);

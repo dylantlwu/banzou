@@ -472,6 +472,8 @@ pub struct CheckRow {
     /// 上次同步给电视的歌单里有没有这首、内容是不是旧的
     pub tv_synced: bool,
     pub tv_stale: bool,
+    /// 整首歌已经在电视上，但电视上的歌词和电脑上的不一样（或电视上没有）。按上次同步时记下的算
+    pub tv_lyrics_stale: bool,
 }
 
 /// `tv_cache`：电视工作目录（里面有 previews/ 和 previews/catalog.json）
@@ -481,6 +483,7 @@ pub fn check(root: &Path, lib: &Library, tags: &Value, tv_cache: &Path) -> Vec<C
         .unwrap_or_default();
     let catalog: Value = fs::read(tv_cache.join("previews/catalog.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
     let entries: Vec<&Value> = catalog.get("songs").and_then(Value::as_array).map(|a| a.iter().collect()).unwrap_or_default();
+    let on_tv: Value = fs::read(tv_cache.join(tv::ON_TV_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
     lib.songs
         .iter()
         .map(|s| {
@@ -489,7 +492,8 @@ pub fn check(root: &Path, lib: &Library, tags: &Value, tv_cache: &Path) -> Vec<C
                 Ok((m, false)) => (m, "none", None),
                 Err(e) => (synthesize(&s.title, s.artist.as_deref(), tags), "broken", Some(e)),
             };
-            let lyrics_timed = s.lyrics.as_ref().and_then(|l| fs::read_to_string(&l.path).ok()).is_some_and(|t| !tv::lrc_lines(&t).is_empty());
+            let lyrics_text = s.lyrics.as_ref().and_then(|l| fs::read_to_string(&l.path).ok());
+            let lyrics_timed = lyrics_text.as_deref().is_some_and(|t| !tv::lrc_lines(t).is_empty());
             let prefix = format!("{}-", meta.id);
             let pv = previews.iter().filter(|f| f.starts_with(&prefix) && !f.contains(".part")).collect::<Vec<_>>();
             let tv_preview = if pv.iter().any(|f| f.ends_with(".mp4")) {
@@ -505,7 +509,11 @@ pub fn check(root: &Path, lib: &Library, tags: &Value, tv_cache: &Path) -> Vec<C
                 let get = |k: &str| e.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
                 get("title").as_deref() != Some(meta.shown_title()) || get("artist") != artist || get("lang").as_deref() != meta.text("lang") || get("era").as_deref() != meta.text("era")
             });
-            CheckRow { key: s.title.clone(), song_id: meta.id.clone(), sheet: sheet.into(), sheet_error: err, meta, lyrics_timed, tv_preview, tv_synced: entry.is_some(), tv_stale }
+            let tv_lyrics_stale = match (on_tv.get(&meta.id).and_then(Value::as_str), &lyrics_text) {
+                (Some(print), Some(text)) => tv::lyrics_print(text) != print,
+                _ => false,
+            };
+            CheckRow { key: s.title.clone(), song_id: meta.id.clone(), sheet: sheet.into(), sheet_error: err, meta, lyrics_timed, tv_preview, tv_synced: entry.is_some(), tv_stale, tv_lyrics_stale }
         })
         .collect()
 }
@@ -816,6 +824,23 @@ mod tests {
         assert_eq!(m.text("artist"), Some("我填的"));
         assert_eq!(m.text("note"), Some("背景"));
         assert_eq!(m.by.get("note").map(String::as_str), Some(AI));
+    }
+
+    #[test]
+    fn check_flags_old_lyrics_on_tv() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = lib_with(d.path(), &["甲 - 伴奏.wav", "乙 - 伴奏.wav"]);
+        fs::write(d.path().join("甲.lrc"), "[00:01.00]新的").unwrap();
+        fs::write(d.path().join("乙.lrc"), "[00:01.00]一样").unwrap();
+        let lib2 = library::scan_dir(d.path()).unwrap();
+        let tv_cache = d.path().join("tv");
+        fs::create_dir_all(&tv_cache).unwrap();
+        // 甲：电视上没有歌词；乙：电视上的和电脑一样
+        fs::write(tv_cache.join(tv::ON_TV_FILE), json!({ tv::song_id("甲"): "", tv::song_id("乙"): tv::lyrics_print("[00:01.00]一样\r\n") }).to_string()).unwrap();
+        let rows = check(d.path(), &lib2, &Value::Null, &tv_cache);
+        assert!(rows.iter().find(|r| r.key == "甲").unwrap().tv_lyrics_stale);
+        assert!(!rows.iter().find(|r| r.key == "乙").unwrap().tv_lyrics_stale);
+        drop(lib);
     }
 
     #[test]

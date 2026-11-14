@@ -192,9 +192,19 @@ fn curl_quote(s: &str) -> String {
 fn curl_post(dir: &Path, url: &str, headers: &[(&str, &str)], body: &str, timeout_s: u32) -> Result<(u16, Vec<u8>), String> {
     let direct = crate::net::direct_interface(dir, url);
     let first = curl_post_via(url, headers, body, timeout_s, direct.as_deref());
-    match (&first, &direct) {
-        (Err(e), Some(_)) if e == NO_CONNECTION => curl_post_via(url, headers, body, timeout_s, None),
-        _ => first,
+    if direct.is_none() {
+        return first;
+    }
+    match &first {
+        // 直连不通：记下来（一阵子内不再试），这次按系统路由再发一遍
+        Err(e) if e == NO_CONNECTION => {
+            crate::net::note_direct(url, false);
+            curl_post_via(url, headers, body, timeout_s, None)
+        }
+        _ => {
+            crate::net::note_direct(url, true);
+            first
+        }
     }
 }
 
@@ -385,33 +395,28 @@ pub(crate) fn voice_key(dir: &Path) -> String {
     format!("{}|{}", t.speaker, t.speech_rate)
 }
 
-/// 用豆包把一段话合成 mp3。
-///
-/// 中文音色遇到假名多的短句会回「说完了」却一点声音都不给（实测「《かじつ》」「这首歌叫《かじつ》。」都是空的），
-/// 告诉它这段是日语（explicit_language = ja）就正常。所以有假名时按句读切成中文段和日文段，
-/// 日文段标上日语，各自合成后按顺序拼成一个 mp3。
+/// 用豆包把一段话合成 mp3（有假名时整句标成日语，见 speech_language）
 pub fn speak(dir: &Path, text: &str) -> Result<Vec<u8>, String> {
     let t = read_tts(dir);
     let auth = t.auth().ok_or("还没有填豆包语音的 API Key")?;
-    let parts = language_parts(text);
-    let mut clips = Vec::with_capacity(parts.len());
-    // 一次最多并发 4 段，免得撞上豆包的并发上限
-    for group in parts.chunks(4) {
-        let results: Vec<Result<Vec<u8>, String>> = std::thread::scope(|s| {
-            let jobs: Vec<_> = group
-                .iter()
-                .map(|(part, ja)| {
-                    let (t, auth) = (&t, &auth);
-                    s.spawn(move || speak_once(dir, t, auth, part, ja.then_some("ja")))
-                })
-                .collect();
-            jobs.into_iter().map(|j| j.join().unwrap_or_else(|_| Err("豆包语音出错了，请再试一次".into()))).collect()
-        });
-        for r in results {
-            clips.push(r?);
-        }
+    speak_once(dir, &t, &auth, text, speech_language(text))
+}
+
+/// 指定音色和语种念一段（只给试验用，比如 learn/speech.rs 的日语段换音色拼接；老师默认走 speak）。speaker 为空 = 设置里的音色
+pub fn speak_as(dir: &Path, text: &str, speaker: Option<&str>, language: Option<&str>) -> Result<Vec<u8>, String> {
+    let mut t = read_tts(dir);
+    let auth = t.auth().ok_or("还没有填豆包语音的 API Key")?;
+    if let Some(s) = speaker {
+        t.speaker = s.to_string();
     }
-    Ok(join_mp3(clips))
+    speak_once(dir, &t, &auth, text, language)
+}
+
+/// 有假名的话整句按日语前端念（explicit_language = ja）。实测（2026-11-13）：
+/// 不加时，整句或一段只有假名就不出声（「《かじつ》」「第一次：《かじつ》。」）；
+/// 加了以后假名念得出，中文照样念中文；整句一次发比按句切开再拼更连贯（切开时短的日语词会被吞掉），也只花一次请求
+fn speech_language(text: &str) -> Option<&'static str> {
+    text.chars().any(is_kana).then_some("ja")
 }
 
 fn speak_once(dir: &Path, t: &Tts, auth: &DoubaoAuth, text: &str, language: Option<&str>) -> Result<Vec<u8>, String> {
@@ -447,61 +452,9 @@ fn speak_once(dir: &Path, t: &Tts, auth: &DoubaoAuth, text: &str, language: Opti
     parse_tts_stream(&out)
 }
 
-fn is_kana(c: char) -> bool {
+pub(crate) fn is_kana(c: char) -> bool {
     // 平假名、片假名（不算中点・和长音ー）、片假名扩展、半角片假名
     matches!(c, '\u{3041}'..='\u{309F}' | '\u{30A0}'..='\u{30FA}' | '\u{30FD}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' | '\u{FF66}'..='\u{FF9F}')
-}
-
-/// 把要念的话切成（文字, 是不是日语）的几段：按标点和空格切句，有假名的句子算日语，相邻同语言的再并回去。
-/// 开引号、书名号跟着后面的字，句末标点跟着前面的字。没有假名就原样一段。
-pub(crate) fn language_parts(text: &str) -> Vec<(String, bool)> {
-    const OPEN: &[char] = &['《', '「', '『', '（', '(', '【', '〈', '“', '‘', '['];
-    let mut pieces: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let has_word = |s: &str| s.chars().any(char::is_alphanumeric);
-    for c in text.chars() {
-        let ends_in_mark = cur.chars().last().is_some_and(|l| !l.is_alphanumeric());
-        let starts_new = if OPEN.contains(&c) { has_word(&cur) } else { c.is_alphanumeric() && has_word(&cur) && ends_in_mark };
-        if starts_new {
-            pieces.push(std::mem::take(&mut cur));
-        }
-        cur.push(c);
-    }
-    if !cur.is_empty() {
-        pieces.push(cur);
-    }
-    let mut parts: Vec<(String, bool)> = Vec::new();
-    for p in pieces {
-        let ja = if has_word(&p) { p.chars().any(is_kana) } else { parts.last().is_some_and(|l| l.1) };
-        match parts.last_mut() {
-            Some(last) if last.1 == ja || !has_word(&last.0) => {
-                last.0.push_str(&p);
-                last.1 = ja;
-            }
-            _ => parts.push((p, ja)),
-        }
-    }
-    if parts.is_empty() {
-        parts.push((text.to_string(), false));
-    }
-    parts
-}
-
-/// 豆包返回的是不带总长信息的流式 mp3，可以直接首尾相接；只要去掉后面几段开头的 ID3 标签
-fn join_mp3(clips: Vec<Vec<u8>>) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (i, clip) in clips.into_iter().enumerate() {
-        let skip = match clip.get(..10) {
-            Some(h) if i > 0 && h.starts_with(b"ID3") => {
-                let size = h[6..10].iter().fold(0usize, |n, &b| (n << 7) | (b & 0x7f) as usize);
-                let footer = if h[5] & 0x10 != 0 { 10 } else { 0 };
-                (10 + size + footer).min(clip.len())
-            }
-            _ => 0,
-        };
-        out.extend_from_slice(&clip[skip..]);
-    }
-    out
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -615,23 +568,12 @@ mod tests {
     }
 
     #[test]
-    fn kana_goes_to_its_own_japanese_part() {
-        let parts = |t: &str| language_parts(t);
-        assert_eq!(parts("你好，我们开始吧。"), vec![("你好，我们开始吧。".to_string(), false)]);
-        assert_eq!(parts("《かじつ》"), vec![("《かじつ》".to_string(), true)]);
-        assert_eq!(parts("这首歌叫《かじつ》。"), vec![("这首歌叫".to_string(), false), ("《かじつ》。".to_string(), true)]);
-        assert_eq!(
-            parts("这句「気付いて、そして」要轻一点。Kajitsu 也行"),
-            vec![("这句".to_string(), false), ("「気付いて、そして」".to_string(), true), ("要轻一点。Kajitsu 也行".to_string(), false)]
-        );
-        assert_eq!(parts("夏の実"), vec![("夏の実".to_string(), true)]);
-        assert_eq!(parts("……"), vec![("……".to_string(), false)]);
-    }
-
-    #[test]
-    fn mp3_parts_join_without_inner_id3() {
-        let tag = |body: &[u8]| [b"ID3\x04\x00\x00\x00\x00\x00\x02".as_slice(), b"xx", body].concat();
-        assert_eq!(join_mp3(vec![tag(b"AA"), tag(b"BB"), b"CC".to_vec()]), [tag(b"AA"), b"BBCC".to_vec()].concat());
+    fn kana_switches_to_japanese_frontend() {
+        assert_eq!(speech_language("你好，我们开始吧。"), None);
+        assert_eq!(speech_language("Kajitsu 也行"), None);
+        assert_eq!(speech_language("《かじつ》"), Some("ja"));
+        assert_eq!(speech_language("注意「そら」的 ら，舌尖弹一下就离开。"), Some("ja"));
+        assert_eq!(speech_language("ｶｼﾞﾂ"), Some("ja"));
     }
 
     #[test]

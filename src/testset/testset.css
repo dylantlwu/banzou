@@ -1,0 +1,134 @@
+/* 录我的测试集（PRD 4.12）：一页一句 */
+.ts-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 16px;
+  min-height: 100vh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ts-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ts-jump {
+  margin-left: auto;
+}
+
+.ts-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+
+.ts-bar-seg {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.ts-bar-seg.done {
+  background: var(--good);
+}
+
+.ts-bar-seg.skipped {
+  background: var(--muted);
+}
+
+.ts-bar-seg.here {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ts-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ts-kind {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ts-text {
+  font-size: 26px;
+  line-height: 1.6;
+}
+
+.ts-say {
+  font-size: 18px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.ts-wrong {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-bottom: 2px dashed var(--accent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.ts-mistake {
+  border-left: 3px solid var(--accent);
+  padding: 6px 10px;
+  background: var(--hover);
+  border-radius: 0 8px 8px 0;
+}
+
+.ts-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ts-rec {
+  min-width: 120px;
+}
+
+.ts-rec.on {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+
+.ts-spacer {
+  flex: 1;
+}
+
+.ts-status {
+  min-height: 1.4em;
+}
+
+.ts-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.ts-level {
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.ts-level span {
+  display: block;
+  height: 100%;
+  background: var(--good);
+}
