@@ -101,6 +101,28 @@ describe("alignToTranscript", () => {
     expect(res.suggestions).toContainEqual(expect.objectContaining({ kind: "missing", line: 1, heard: "歌词里没有的这一句话", time: 14 }));
   });
 
+  it("改编版多唱了一段歌词里没有的词：后一句不会被拉到那段开头，空行留在原处", () => {
+    const lines = [line("第一句歌词在这里", 10), line("第二句歌词在这里", 14), line("", 17.5), line("数着路灯慢慢回家", 18)];
+    const tokens = [
+      ...sing("第一句歌词在这里", 10),
+      ...sing("第二句歌词在这里", 14),
+      ...sing("窗外的风轻轻吹过安静的街道", 20),
+      // 句首「数」没听清，后面的字对上
+      ...sing("着路灯慢慢回家", 40.3),
+    ];
+    const res = alignToTranscript(lines, tokens)!;
+    expect(res.lines[3].time).toBe(40);
+    expect(res.lines[2].time).toBe(17.5);
+    expect(res.suggestions).toContainEqual(expect.objectContaining({ kind: "missing", line: 3, time: 20 }));
+  });
+
+  it("句中的字被拉长（吞了前面没听清的字）：从它的结尾往前推句首", () => {
+    const lines = [line("风吹过窗外", 10), line("慢一点吧回家了", 12)];
+    const tokens: Token[] = [...sing("风吹过窗外", 10), { start: 11.6, end: 16, text: "回" }, ...sing("家了", 16)];
+    const res = alignToTranscript(lines, tokens)!;
+    expect(res.lines[1].time).toBe(14.5);
+  });
+
   it("一句都对不上返回 null", () => {
     expect(alignToTranscript([line("完全不同的歌词", 1)], sing("毫无关系", 1))).toBeNull();
     expect(alignToTranscript([line("歌词", 1)], [])).toBeNull();

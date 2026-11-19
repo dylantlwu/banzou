@@ -3,6 +3,7 @@ import { Btn } from "../components/Btn";
 import { followMasterVolume } from "../audio/masterVolume";
 import { MarkedText } from "./MarkedText";
 import { type Remembered, SCOPE_NAME, type Turn, askTeacher, clearChat, loadChat, loadNotes, setNote, speakLine, undoRemember } from "./api";
+import { routeElement } from "../audio/outputRoute";
 
 interface Props {
   title: string;
@@ -146,6 +147,7 @@ export function TeacherChat({ title, onNotesChanged }: Props) {
       const audio = followMasterVolume(new Audio(`data:audio/mpeg;base64,${r.audio}`));
       audioRef.current = audio;
       audio.onended = () => setSpeaking((s) => (s === index ? null : s));
+      await routeElement(audio);
       await audio.play();
     } catch (e) {
       setVoiceError(String(e));

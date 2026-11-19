@@ -69,6 +69,8 @@ pub struct Guess {
     pub note: Option<String>,
     /// 原曲名（去掉歌名里的歌手名和版本说明），搜歌词用
     pub track: Option<String>,
+    /// 歌手的其他写法（英文名、拼音、本名），逗号隔开；歌词库常用英文名登记中文歌手
+    pub aliases: Option<String>,
 }
 
 /// 用户手动改过的歌，当范例给 AI 看（AI 照着用户的口味判断）
@@ -100,6 +102,7 @@ fn prompt(songs: &[AskSong], examples: &[Example]) -> String {
          - era：这首歌首次发行的年代，只能是 {} 或「未知」（以查到的发行年份为准，不要凭感觉）\n\
          - note：一句话背景（60 字以内）：原唱、所属专辑或影视作品、发行年份、有没有翻唱版本；查不到就写空字符串\n\
          - track：原曲名，去掉歌名里的歌手名和版本说明（如 Neo Soul Reimagined、伴奏、Official MV），用来搜歌词；拿不准就留空字符串\n\
+         - aliases：歌手的其他写法（官方英文名、拼音、本名），用逗号隔开，用来在国外歌词库里找歌；没有就留空字符串\n\
          如果同名歌曲有多个版本，以歌名里的歌手 / 已知歌手为准。{ex}\n\
          最后只输出一个 JSON，不要任何别的文字：{{\"songs\":[{{\"id\":\"原样返回\",\"artist\":\"\",\"lang\":\"\",\"era\":\"\",\"note\":\"\"}}]}}\n\n{}",
         LANGS.join("、"),
@@ -145,7 +148,7 @@ pub fn parse_reply(reply: &Value, asked: &[AskSong]) -> Result<Vec<Guess>, Strin
         }
         let pick = |k: &str, allowed: &[&str]| item.get(k).and_then(Value::as_str).filter(|v| allowed.contains(v)).map(str::to_string);
         let text = |k: &str, n: usize| item.get(k).and_then(Value::as_str).map(|a| a.trim().chars().take(n).collect::<String>()).filter(|a| !a.is_empty());
-        out.push(Guess { id: id.to_string(), artist: text("artist", 40), lang: pick("lang", LANGS), era: pick("era", ERAS), note: text("note", 120), track: text("track", 80) });
+        out.push(Guess { id: id.to_string(), artist: text("artist", 40), lang: pick("lang", LANGS), era: pick("era", ERAS), note: text("note", 120), track: text("track", 80), aliases: text("aliases", 80) });
     }
     Ok(out)
 }
@@ -190,6 +193,7 @@ fn call(key: &str, body: &Value) -> Result<Value, String> {
     );
     let mut child = Command::new("/usr/bin/curl")
         .args(["-sS", "--max-time", "300", "-K", "-"])
+        .args(crate::net::dns_curl_args("https://api.anthropic.com"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -235,52 +239,148 @@ fn norm(s: &str) -> String {
     fast2s::convert(s).chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
 }
 
-/// 从搜索结果里挑一个合适的：要有带时间轴的歌词、歌名对得上、（知道的话）歌手对得上、时长差不超过 8 秒。
-/// 一个都不合适就返回 None（宁可空着，也不要配错歌词）
-pub fn pick_lrc(results: &Value, track: &str, artist: &str, duration: Option<f64>) -> Option<String> {
+/// 搜索结果里歌名、歌手都对得上、带时间轴的歌词：(歌词, 时长, 登记的歌手)。artist 为空 = 不看歌手
+fn matching(results: &Value, track: &str, artist: &str) -> Vec<(String, Option<f64>, String)> {
     let want_track = norm(track);
     let want_artist = norm(artist);
     if want_track.chars().count() < 2 {
-        return None;
+        return Vec::new();
     }
-    results.as_array()?.iter().find_map(|r| {
-        let lrc = r.get("syncedLyrics").and_then(Value::as_str).map(str::trim).filter(|l| !l.is_empty())?;
-        if r.get("instrumental").and_then(Value::as_bool) == Some(true) {
-            return None;
-        }
-        let t = norm(r.get("trackName").and_then(Value::as_str)?);
-        if t != want_track && !(t.chars().count() >= 3 && (t.contains(&want_track) || want_track.contains(&t))) {
-            return None;
-        }
-        let a = norm(r.get("artistName").and_then(Value::as_str).unwrap_or_default());
-        if !want_artist.is_empty() && !a.is_empty() && !a.contains(&want_artist) && !want_artist.contains(&a) {
-            return None;
-        }
-        if let (Some(want), Some(got)) = (duration, r.get("duration").and_then(Value::as_f64))
-            && want > 0.0
-            && (want - got).abs() > 8.0
-        {
-            return None;
-        }
-        Some(lrc.to_string())
-    })
+    results
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let lrc = r.get("syncedLyrics").and_then(Value::as_str).map(str::trim).filter(|l| !l.is_empty())?;
+            if r.get("instrumental").and_then(Value::as_bool) == Some(true) {
+                return None;
+            }
+            let t = norm(r.get("trackName").and_then(Value::as_str)?);
+            if t != want_track && !(t.chars().count() >= 3 && (t.contains(&want_track) || want_track.contains(&t))) {
+                return None;
+            }
+            let a = norm(r.get("artistName").and_then(Value::as_str).unwrap_or_default());
+            if !want_artist.is_empty() && !a.is_empty() && !a.contains(&want_artist) && !want_artist.contains(&a) {
+                return None;
+            }
+            Some((lrc.to_string(), r.get("duration").and_then(Value::as_f64), r.get("artistName").and_then(Value::as_str).unwrap_or_default().to_string()))
+        })
+        .collect()
 }
 
-/// 去 LRCLIB 搜歌词。找不到合适的返回 Ok(None)；网络问题返回 Err
-pub fn fetch_lrc(artist: &str, track: &str, duration: Option<f64>) -> Result<Option<String>, String> {
-    let mut args: Vec<String> = ["-sS", "-G", "--max-time", "20", "-A", "BanzouLyrics/0.3", "--data-urlencode"].map(String::from).to_vec();
-    args.push(format!("track_name={track}"));
-    if !artist.is_empty() {
+/// 从搜索结果里挑一个合适的：要有带时间轴的歌词、歌名对得上、（知道的话）歌手对得上、时长差不超过 8 秒。
+/// 一个都不合适就返回 None（宁可空着，也不要配错歌词）
+pub fn pick_lrc(results: &Value, track: &str, artist: &str, duration: Option<f64>) -> Option<String> {
+    let all = matching(results, track, artist);
+    let Some(want) = duration.filter(|d| *d > 0.0) else { return all.into_iter().next().map(|(l, ..)| l) };
+    // 时长差 8 秒以内的里面挑最接近的；不知道时长的排在最后
+    all.into_iter()
+        .filter(|(_, got, _)| got.is_none_or(|g| (want - g).abs() <= 8.0))
+        .min_by(|a, b| {
+            let d = |x: &Option<f64>| x.map_or(f64::MAX, |g| (want - g).abs());
+            d(&a.1).total_cmp(&d(&b.1))
+        })
+        .map(|(l, ..)| l)
+}
+
+/// 一份候选歌词：要按这首的人声用智能对齐核对过才能用
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LrcCandidate {
+    pub lrc: String,
+    /// 那份歌词的时长 - 这首的时长（秒）；不知道就是 None
+    pub diff: Option<f64>,
+    /// 歌词库里登记的歌手
+    pub artist: String,
+    /// 是不是同一位歌手（含别名）
+    pub same_artist: bool,
+}
+
+/// 搜到的歌词：同一位歌手（含别名）、时长差 ≤ 8 秒的直接用；
+/// 其余的（时长对不上的剪辑版 / 改编版，或者别的歌手登记的同名歌）都只是候选，要按人声对齐核对
+#[derive(Debug, Clone, PartialEq)]
+pub enum LrcPick {
+    Exact(String),
+    /// 最多 3 份，同一歌手的排前面，再按时长接近排
+    Verify(Vec<LrcCandidate>),
+}
+
+const MAX_CANDIDATES: usize = 3;
+
+/// 歌手对不对得上：歌手或任一别名（去标点、繁简、大小写后）互相包含
+pub fn artist_matches(name: &str, artist: &str, aliases: &[String]) -> bool {
+    let n = norm(name);
+    !n.is_empty()
+        && std::iter::once(artist).chain(aliases.iter().map(String::as_str)).map(norm).filter(|a| !a.is_empty()).any(|a| n.contains(&a) || a.contains(&n))
+}
+
+/// 从（可能是几次搜索拼起来的）结果里挑：歌名对得上的才算；同一歌手 + 时长 ≤ 8 秒 → 直接用；否则给候选
+pub fn choose_lrc(results: &[Value], track: &str, artist: &str, aliases: &[String], duration: Option<f64>) -> Option<LrcPick> {
+    let want = duration.filter(|d| *d > 0.0);
+    let mut seen = std::collections::HashSet::new();
+    let mut all: Vec<(String, Option<f64>, String, bool)> = Vec::new();
+    for r in results {
+        for (lrc, dur, name) in matching(r, track, "") {
+            if seen.insert(lrc.clone()) {
+                let same = artist_matches(&name, artist, aliases);
+                all.push((lrc, dur, name, same));
+            }
+        }
+    }
+    if all.is_empty() {
+        return None;
+    }
+    // 同一歌手、时长对得上：直接用（时长最接近的那份；不知道这首多长就用第一份）
+    let exact = match want {
+        Some(w) => all.iter().filter(|(_, d, _, same)| *same && d.is_some_and(|d| (w - d).abs() <= 8.0)).min_by(|a, b| (w - a.1.unwrap()).abs().total_cmp(&(w - b.1.unwrap()).abs())),
+        None => all.iter().find(|(_, _, _, same)| *same),
+    };
+    if let Some((lrc, ..)) = exact {
+        return Some(LrcPick::Exact(lrc.clone()));
+    }
+    // 候选：时长写错（最后一句比自己说的时长还晚）的不要；同一歌手优先，再按时长接近
+    let mut cands: Vec<LrcCandidate> = all
+        .into_iter()
+        .filter(|(lrc, d, ..)| d.is_none_or(|g| crate::tv::lrc_lines(lrc).last().is_none_or(|(l, _)| *l <= g + 5.0)))
+        .map(|(lrc, d, name, same)| LrcCandidate { diff: match (d, want) {
+            (Some(d), Some(w)) => Some(d - w),
+            _ => None,
+        }, lrc, artist: name, same_artist: same })
+        .collect();
+    cands.sort_by(|a, b| b.same_artist.cmp(&a.same_artist).then(a.diff.map_or(f64::MAX, f64::abs).total_cmp(&b.diff.map_or(f64::MAX, f64::abs))));
+    cands.truncate(MAX_CANDIDATES);
+    (!cands.is_empty()).then_some(LrcPick::Verify(cands))
+}
+
+/// 问一次 LRCLIB 搜索接口。params 例如 [("track_name", "年轮"), ("artist_name", "汪苏泷")] 或 [("q", "年轮")]
+fn lrclib_search(params: &[(&str, &str)]) -> Result<Value, String> {
+    let mut args: Vec<String> = ["-sS", "-G", "--max-time", "20", "-A", "BanzouLyrics/0.3"].map(String::from).to_vec();
+    for (k, v) in params {
         args.push("--data-urlencode".into());
-        args.push(format!("artist_name={artist}"));
+        args.push(format!("{k}={v}"));
     }
     args.push("https://lrclib.net/api/search".into());
+    args.extend(crate::net::dns_curl_args("https://lrclib.net"));
     let out = Command::new("/usr/bin/curl").args(&args).output().map_err(|e| format!("没法联网：{e}"))?;
     if !out.status.success() {
         return Err("连不上歌词库".into());
     }
-    let results: Value = serde_json::from_slice(&out.stdout).map_err(|_| "歌词库的回复看不懂".to_string())?;
-    Ok(pick_lrc(&results, track, artist, duration))
+    serde_json::from_slice(&out.stdout).map_err(|_| "歌词库的回复看不懂".to_string())
+}
+
+/// 搜歌词（资料检查「AI 搜歌词」和 AI 补资料用）：
+/// 1. 歌名 + 歌手、歌名 + 每个别名（歌词库常把中文歌手登记成英文名）
+/// 2. 同一歌手里有时长对得上的就直接用；没有就再只用歌名搜（q=歌名），把候选交给前端按人声核对
+pub fn fetch_lrc_any(artist: &str, aliases: &[String], track: &str, duration: Option<f64>) -> Result<Option<LrcPick>, String> {
+    let mut results = Vec::new();
+    for name in std::iter::once(artist).chain(aliases.iter().map(String::as_str).take(2)).filter(|a| !a.trim().is_empty()) {
+        results.push(lrclib_search(&[("track_name", track), ("artist_name", name)])?);
+    }
+    if let Some(LrcPick::Exact(l)) = choose_lrc(&results, track, artist, aliases, duration) {
+        return Ok(Some(LrcPick::Exact(l)));
+    }
+    results.push(lrclib_search(&[("q", track)])?);
+    Ok(choose_lrc(&results, track, artist, aliases, duration))
 }
 
 #[cfg(test)]
@@ -296,9 +396,9 @@ mod tests {
         let text = r#"{"songs":[{"id":"a1","artist":"卢广仲","lang":"国语","era":"10s"},{"id":"zz","artist":"x","lang":"国语","era":"10s"}]}"#;
         let reply = json!({ "content": [{ "type": "thinking", "thinking": "" }, { "type": "text", "text": text }] });
         let g = parse_reply(&reply, &asked()).unwrap();
-        assert_eq!(g, vec![Guess { id: "a1".into(), artist: Some("卢广仲".into()), lang: Some("国语".into()), era: Some("10s".into()), note: None, track: None }]);
+        assert_eq!(g, vec![Guess { id: "a1".into(), artist: Some("卢广仲".into()), lang: Some("国语".into()), era: Some("10s".into()), note: None, track: None, aliases: None }]);
         let weird = json!({ "content": [{ "type": "text", "text": r#"{"songs":[{"id":"a1","artist":"","lang":"火星语","era":"未知"}]}"# }] });
-        assert_eq!(parse_reply(&weird, &asked()).unwrap(), vec![Guess { id: "a1".into(), artist: None, lang: None, era: None, note: None, track: None }]);
+        assert_eq!(parse_reply(&weird, &asked()).unwrap(), vec![Guess { id: "a1".into(), artist: None, lang: None, era: None, note: None, track: None, aliases: None }]);
     }
 
     #[test]
@@ -323,6 +423,48 @@ mod tests {
         assert_eq!(pick_lrc(&r, "几分之几", "卢广仲", Some(100.0)), None);
         assert_eq!(pick_lrc(&r, "我", "", None), None);
         assert_eq!(pick_lrc(&json!([]), "几分之几", "卢广仲", None), None);
+    }
+
+    fn entry(track: &str, artist: &str, dur: f64, lrc: &str) -> Value {
+        json!({ "trackName": track, "artistName": artist, "duration": dur, "syncedLyrics": lrc })
+    }
+
+    #[test]
+    fn same_artist_within_8s_is_used_directly_closest_wins() {
+        let r = json!([entry("Abc Song", "X", 295.0, "[00:01.00]远"), entry("Abc Song", "X", 289.0, "[00:01.00]近"), entry("Abc Song", "Y", 288.0, "[00:01.00]别人")]);
+        assert_eq!(pick_lrc(&r, "Abc Song", "X", Some(288.0)).as_deref(), Some("[00:01.00]近"));
+        assert_eq!(choose_lrc(&[r], "Abc Song", "X", &[], Some(288.0)), Some(LrcPick::Exact("[00:01.00]近".into())));
+    }
+
+    #[test]
+    fn other_artist_or_length_mismatch_only_as_candidates() {
+        // 歌词库把中文歌手登记成英文名；还有别的歌手唱的同名歌、时长写错的
+        let by_title = json!([
+            entry("年轮", "黄雅莉", 229.8, "[00:01.00]黄"),
+            entry("年轮", "Silence Wang", 245.0, "[00:01.00]汪"),
+            entry("年轮", "张碧晨", 274.0, "[00:01.00]张"),
+            entry("年轮", "某人", 200.0, "[00:01.00]a\n[05:00.00]写错时长"),
+            entry("别的歌", "Silence Wang", 232.0, "[00:01.00]不是这首")
+        ]);
+        // 没有别名：同名的别人唱的哪怕时长对得上也不直接用，只给候选（按时长接近排，最多 3 份）
+        let Some(LrcPick::Verify(c)) = choose_lrc(std::slice::from_ref(&by_title), "年轮", "汪苏泷", &[], Some(232.6)) else { panic!() };
+        assert_eq!(c.iter().map(|x| x.artist.as_str()).collect::<Vec<_>>(), ["黄雅莉", "Silence Wang", "张碧晨"]);
+        assert!(c.iter().all(|x| !x.same_artist));
+        assert_eq!(c[0].diff.map(|d| (d * 10.0).round() / 10.0), Some(-2.8));
+        // 有别名：同一歌手排第一；时长差 12 秒，所以还是候选
+        let Some(LrcPick::Verify(c)) = choose_lrc(&[json!([]), by_title.clone()], "年轮", "汪苏泷", &["Silence Wang".into()], Some(232.6)) else { panic!() };
+        assert_eq!((c[0].artist.as_str(), c[0].same_artist), ("Silence Wang", true));
+        // 别名 + 时长对得上：直接用
+        assert_eq!(choose_lrc(&[by_title], "年轮", "汪苏泷", &["silence wang".into()], Some(247.0)), Some(LrcPick::Exact("[00:01.00]汪".into())));
+        assert_eq!(choose_lrc(&[json!([])], "年轮", "汪苏泷", &[], Some(232.6)), None);
+    }
+
+    #[test]
+    fn artist_alias_matching() {
+        assert!(artist_matches("盧廣仲", "卢广仲", &[]));
+        assert!(artist_matches("Silence Wang", "汪苏泷", &["Silence Wang".into()]));
+        assert!(!artist_matches("Silence Wang", "汪苏泷", &[]));
+        assert!(!artist_matches("", "汪苏泷", &[]));
     }
 
     #[test]

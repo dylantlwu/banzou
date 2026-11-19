@@ -72,9 +72,9 @@ export class LiveVoice {
     this.micError = null;
     let stream: MediaStream | null = null;
     try {
-      if (!o.deviceId) throw new Error("没有找到可用的麦克风（蓝牙耳机的麦克风不能用）");
+      // 没给 deviceId = 用系统默认的麦克风（设置里选了「跟系统设置」，或记住的没插上）
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: o.deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        audio: { deviceId: o.deviceId ? { exact: o.deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
       this.label = stream.getAudioTracks()[0]?.label ?? "";
       if (isBluetoothLabel(this.label)) {

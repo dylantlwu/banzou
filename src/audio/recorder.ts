@@ -7,6 +7,7 @@
  * - 按设备 ID 打开麦克风，关掉回声消除 / 降噪 / 自动增益（否则人声会被处理得发闷）
  * - 绝不用 AirPods 等蓝牙麦克风：一打开蓝牙就切到通话模式，耳机里的伴奏会突然变差
  */
+import { outputFor } from "./outputRoute";
 
 const WORKLET = `
 class Capture extends AudioWorkletProcessor {
@@ -164,7 +165,7 @@ export class Recorder {
     if (on && !this.monitorGain) {
       this.monitorGain = this.ctx.createGain();
       this.monitorGain.gain.value = volume;
-      this.source.connect(this.monitorGain).connect(this.ctx.destination);
+      this.source.connect(this.monitorGain).connect(outputFor(this.ctx));
     } else if (!on && this.monitorGain) {
       this.monitorGain.disconnect();
       this.monitorGain = null;

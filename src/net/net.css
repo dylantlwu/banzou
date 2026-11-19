@@ -46,3 +46,9 @@
 .net-warn {
   color: var(--ok);
 }
+
+/* 结果那句话长（比如 DNS 被污染的说明）时，路线和「测一下」不被挤成竖排 */
+.net-table td:nth-child(2),
+.net-table td:nth-child(3) {
+  white-space: nowrap;
+}

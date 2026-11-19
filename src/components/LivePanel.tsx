@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { type InputDevice, listInputs } from "../audio/recorder";
+import { MicSelect } from "./MicSelect";
 import { type LiveInfo, getLiveInfo, openLiveWindow } from "../live/liveSync";
 import type { GoLiveApi } from "../live/useGoLive";
 import type { LivePosition, Settings } from "../settings";
@@ -51,16 +51,12 @@ export function LivePanel({ settings, onChange, onClose, live }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [inputs, setInputs] = useState<InputDevice[]>([]);
   const urlRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getLiveInfo()
       .then(setInfo)
       .catch((e) => setError(String(e)));
-    listInputs()
-      .then(setInputs)
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -136,6 +132,7 @@ export function LivePanel({ settings, onChange, onClose, live }: Props) {
             <div>
               声音：
               {live.micError ? <span className="error-text">{live.micError}（现在只推伴奏和歌词）</span> : "麦克风 → 实时修音 → 直播"}
+              {live.micNote && <span className="error-text"> {live.micNote}</span>}
               <span className="meter inline">
                 <span className={`meter-fill ${live.peak > 0.95 ? "clip" : db > -30 ? "good" : "low"}`} style={{ width: `${Math.max(0, Math.min(100, ((db + 60) / 60) * 100))}%` }} />
               </span>
@@ -217,21 +214,13 @@ export function LivePanel({ settings, onChange, onClose, live }: Props) {
           </div>
           <div className="live-style">
             <span className="muted small">麦克风</span>
-            <select
-              value={settings.liveMicId}
-              onChange={(e) => {
-                onChange({ liveMicId: e.target.value });
+            <MicSelect
+              value={settings.inputDevice}
+              onChange={(v) => {
+                onChange({ inputDevice: v });
                 if (on) window.setTimeout(() => void live.restartVoice(), 0);
               }}
-            >
-              <option value="">自动（不用蓝牙麦克风）</option>
-              {inputs.map((d) => (
-                <option key={d.deviceId} value={d.deviceId} disabled={d.bluetooth}>
-                  {d.label}
-                  {d.bluetooth ? "（蓝牙，不能用）" : ""}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <p className="muted small">直播里人声比你唱的晚约 0.1 秒（修音和传输），伴奏会一起往后对齐，观众听不出来。直播时别开 OBS 的「监听」。</p>
         </details>

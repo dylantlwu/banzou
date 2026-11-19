@@ -1,5 +1,6 @@
 import { Transport } from "./transport";
 import { clockStalled } from "./outputDevice";
+import { outputFor } from "./outputRoute";
 
 /** 音轨在歌曲时间线上的位置（录音 Take 用）；不给就是从歌曲 0 秒开始、整段播放 */
 export interface TrackRegion {
@@ -71,7 +72,7 @@ export class AudioEngine {
     this.master = this.ctx.createGain();
     this.volume = this.ctx.createGain();
     this.master.connect(this.volume);
-    this.volume.connect(this.ctx.destination);
+    this.volume.connect(outputFor(this.ctx));
   }
 
   /** 总音量 0–1（已经按听感换算好的增益） */
@@ -336,7 +337,7 @@ export class AudioEngine {
     this.volume = this.ctx.createGain();
     this.volume.gain.value = this.volumeValue;
     this.master.connect(this.volume);
-    this.volume.connect(this.ctx.destination);
+    this.volume.connect(outputFor(this.ctx));
     this.chains.clear();
     for (const [group, factory] of this.chainFactories) {
       const chain = factory(this.ctx);

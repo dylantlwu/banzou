@@ -7,7 +7,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listInputs, pickDefaultInput } from "../audio/recorder";
+import { missingNotice, resolveMic } from "../audio/micChoice";
 import type { Player } from "../player/usePlayer";
 import type { Settings } from "../settings";
 import { type PitchTrack, detectKey, hzToMidi, scalePitchClasses } from "../tune/autotune";
@@ -49,6 +49,8 @@ export function useGoLive({ player, song, settings, updateSettings, transpose }:
   const [steps, setSteps] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
+  /** 记住的麦克风没插上（现在用的是系统默认）时的提示 */
+  const [micNote, setMicNote] = useState<string | null>(null);
   const [obs, setObs] = useState<ObsStatus | null>(null);
   const [info, setInfo] = useState<TunerInfo | null>(null);
   const [peak, setPeak] = useState(0);
@@ -144,8 +146,8 @@ export function useGoLive({ player, song, settings, updateSettings, transpose }:
       voice.onPeak = setPeak;
       voiceRef.current = voice;
     }
-    const inputs = await listInputs().catch(() => []);
-    const mic = inputs.find((d) => d.deviceId === s.liveMicId && !d.bluetooth) ?? pickDefaultInput(inputs);
+    // 用设置里统一的「麦克风」；记住的没插上就用系统默认
+    const mic = await resolveMic(s.inputDevice).catch(() => null);
     const route = await invoke<{ output?: { name: string } }>("audio_route").catch(() => null);
     const name = route?.output?.name || "默认输出";
     roundTripRef.current = (s.recordLatency[name] ?? s.outputLatencyMs + 10) / 1000;
@@ -160,6 +162,7 @@ export function useGoLive({ player, song, settings, updateSettings, transpose }:
       accGain: s.liveAccGain,
     });
     setMicError(voice.micError);
+    setMicNote(!voice.micError && mic?.missing ? missingNotice(mic.missing, voice.label) : null);
     await loadReference();
   }, [player, params, loadReference]);
 
@@ -201,7 +204,7 @@ export function useGoLive({ player, song, settings, updateSettings, transpose }:
 
   useEffect(() => () => voiceRef.current?.stop(), []);
 
-  return { phase, steps, error, micError, obs, info, peak, start, stop, restartVoice: startVoice };
+  return { phase, steps, error, micError, micNote, obs, info, peak, start, stop, restartVoice: startVoice };
 }
 
 export type GoLiveApi = ReturnType<typeof useGoLive>;

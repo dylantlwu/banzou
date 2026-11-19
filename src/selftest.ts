@@ -8,6 +8,10 @@ const log = (m: string) => invoke("debug_log", { message: `${new Date().toISOStr
 
 export async function runSelftestIfEnabled() {
   const mode = await invoke<string>("selftest_mode").catch(() => "");
+  if (mode === "route") {
+    const { runRouteSelftest } = await import("./audio/routeSelftest");
+    return runRouteSelftest(log);
+  }
   if (mode === "output") {
     const { runOutputSelftest } = await import("./audio/outputSelftest");
     return runOutputSelftest(log);

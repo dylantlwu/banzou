@@ -23,6 +23,8 @@ interface TestResult {
   ms: number;
   fellBack: boolean;
   error: string | null;
+  /** 系统 DNS 被污染、已自动绕开时的一句说明 */
+  dns?: string | null;
 }
 
 const ROUTE_NAME: Record<Route, string> = { direct: "直连", system: "跟系统走" };
@@ -31,6 +33,7 @@ const secs = (ms: number) => `${(ms / 1000).toFixed(1)} 秒`;
 
 function resultText(r: TestResult): string {
   if (!r.ok) return r.error ?? "连不上";
+  if (r.dns) return `通了 · ${r.dns} · ${secs(r.ms)}`;
   if (r.fellBack) return `通了，但直连不通，改走系统路由 · ${secs(r.ms)}`;
   return `通了 · ${secs(r.ms)}`;
 }
@@ -77,7 +80,7 @@ export function NetworkSettings() {
     <div className="field net-settings">
       <label>网络</label>
       <p className="muted small">
-        国内的服务「直连」：从 Wi-Fi / 网线直接出去，不进 VPN；国外的「跟系统走」：开着 VPN 就走 VPN。不用再去 VPN 里设分流。
+        国内的服务「直连」：从 Wi-Fi / 网线直接出去，不进 VPN；国外的「跟系统走」：开着 VPN 就走 VPN。不用再去 VPN 里设分流。路由器的 DNS 给国外网站假地址时，应用会自己用加密 DNS 查真地址，不用改系统设置。
       </p>
       <table className="net-table">
         <tbody>
@@ -108,7 +111,7 @@ export function NetworkSettings() {
                   {r === "busy" ? (
                     <span className="muted small">正在连…</span>
                   ) : r ? (
-                    <span className={r.ok ? (r.fellBack ? "small net-warn" : "small net-ok") : "small error-text"}>{resultText(r)}</span>
+                    <span className={r.ok ? (r.fellBack || r.dns ? "small net-warn" : "small net-ok") : "small error-text"}>{resultText(r)}</span>
                   ) : null}
                 </td>
               </tr>

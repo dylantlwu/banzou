@@ -11,6 +11,7 @@
 use crate::library::{self, Library, Song};
 use crate::lyrics_store::sanitize_file_stem;
 use crate::tv;
+use crate::video;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -595,7 +596,7 @@ pub fn ai_propose(
     for g in &guesses {
         let Some((cur, has_lyrics)) = metas.get(&g.id) else { continue };
         let mut patch = Map::new();
-        for (k, v) in [("artist", &g.artist), ("lang", &g.lang), ("era", &g.era), ("note", &g.note), ("track", &g.track)] {
+        for (k, v) in [("artist", &g.artist), ("lang", &g.lang), ("era", &g.era), ("note", &g.note), ("track", &g.track), ("artistAliases", &g.aliases)] {
             if let Some(v) = v
                 && !cur.by_user(k)
                 && (cur.text(k).is_none() || (retag && cur.text(k) != Some(v.as_str())))
@@ -613,6 +614,7 @@ pub fn ai_propose(
 pub fn ai_apply(root: &Path, tags: &Value, proposals: &[AiProposal], duration: impl Fn(&Path) -> Option<f64>) -> Result<Value, String> {
     let lib = library::scan_dir(root).map_err(|e| format!("扫描曲库失败：{e}"))?;
     let (mut written, mut lyrics_found) = (0, 0);
+    let mut pending: Vec<PendingLyrics> = Vec::new();
     for p in proposals {
         let s = find(&lib, &p.key)?;
         let m = save_fields(root, s, tags, &p.patch, AI)?;
@@ -623,16 +625,111 @@ pub fn ai_apply(root: &Path, tags: &Value, proposals: &[AiProposal], duration: i
         if !p.search_lyrics || s.lyrics.is_some() {
             continue;
         }
-        let (Some(track), artist) = (m.text("track"), m.text("artist").unwrap_or_default()) else { continue };
-        let dur = s.accompaniments.first().and_then(|a| duration(Path::new(&a.path)));
-        if let Ok(Some(lrc)) = crate::tags::fetch_lrc(artist, track, dur) {
-            let lrc = if m.text("lang") == Some("国语") { fast2s::convert(&lrc) } else { lrc };
-            if crate::lyrics_store::save_lyrics(root, &s.title, None, &lrc).is_ok() {
-                lyrics_found += 1;
+        match search_lyrics(root, s, &m, &duration) {
+            Ok(LyricsFound::Written) => lyrics_found += 1,
+            Ok(LyricsFound::Pending(p)) => pending.push(p),
+            _ => {}
+        }
+    }
+    Ok(json!({ "songs": written, "lyrics": lyrics_found, "pendingLyrics": pending }))
+}
+
+// ---------- 歌词：搜、对齐、待核对 ----------
+
+/// 歌词库里只有时长对不上的版本（剪辑版 / 完整版）：先不写，交给前端用「智能对齐」按这首的人声重新对时间，
+/// 对上了再用 `lyrics_result` 写成新的 .lrc（标「待核对」）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingLyrics {
+    pub key: String,
+    /// 第一份候选（老字段，兼容）
+    pub lrc: String,
+    /// 第一份候选的时长 - 这首的时长（秒）；不知道是 0
+    pub diff: f64,
+    /// 全部候选（最多 3 份，同一歌手优先）：前端逐份按人声对齐，取对得最好的
+    #[serde(default)]
+    pub candidates: Vec<crate::tags::LrcCandidate>,
+}
+
+/// 歌手别名（资料表 artistAliases，逗号 / 顿号 / 斜杠隔开）：歌词库常把中文歌手登记成英文名
+pub fn artist_aliases(m: &SongMeta) -> Vec<String> {
+    m.text("artistAliases").map(|a| a.split([',', '，', '、', '/', ';', '；']).map(str::trim).filter(|x| !x.is_empty()).map(str::to_string).collect()).unwrap_or_default()
+}
+
+pub enum LyricsFound {
+    Written,
+    Pending(PendingLyrics),
+    NotFound,
+}
+
+/// 没有歌词的歌去 LRCLIB 搜（要有原曲名）。时长对得上直接写；只有对不上的版本就返回 Pending。已有 .lrc 的什么都不做
+pub fn search_lyrics(root: &Path, s: &Song, m: &SongMeta, duration: &impl Fn(&Path) -> Option<f64>) -> Result<LyricsFound, String> {
+    if s.lyrics.is_some() || lyrics_path(root, &s.title).exists() {
+        return Ok(LyricsFound::NotFound);
+    }
+    let Some(track) = m.text("track") else { return Err("还没有原曲名，先用 AI 查一下".into()) };
+    let artist = m.text("artist").unwrap_or_default();
+    let dur = s.accompaniments.first().and_then(|a| duration(Path::new(&a.path)));
+    let simplify = |l: String| if m.text("lang") == Some("国语") { fast2s::convert(&l) } else { l };
+    match crate::tags::fetch_lrc_any(artist, &artist_aliases(m), track, dur)? {
+        Some(crate::tags::LrcPick::Exact(l)) => {
+            crate::lyrics_store::save_lyrics(root, &s.title, None, &simplify(l)).map_err(|e| e.to_string())?;
+            Ok(LyricsFound::Written)
+        }
+        Some(crate::tags::LrcPick::Verify(cands)) => {
+            let candidates: Vec<_> = cands.into_iter().map(|c| crate::tags::LrcCandidate { lrc: simplify(c.lrc), ..c }).collect();
+            let first = &candidates[0];
+            Ok(LyricsFound::Pending(PendingLyrics { key: s.title.clone(), lrc: first.lrc.clone(), diff: first.diff.unwrap_or(0.0), candidates }))
+        }
+        None => Ok(LyricsFound::NotFound),
+    }
+}
+
+fn lyrics_path(root: &Path, key: &str) -> PathBuf {
+    root.join(format!("{}.lrc", sanitize_file_stem(key)))
+}
+
+/// 直接改资料表里的状态字段（不管谁填的；不是用户资料，是工具记的状态）
+fn set_status(root: &Path, s: &Song, tags: &Value, fields: &[(&str, Option<&str>)]) -> Result<(), String> {
+    let (mut m, _) = view(root, s, tags)?;
+    for (k, v) in fields {
+        match v {
+            Some(v) => {
+                m.fields.insert((*k).into(), (*v).into());
+                m.by.insert((*k).into(), TOOL.into());
+            }
+            None => {
+                m.fields.remove(*k);
+                m.by.remove(*k);
             }
         }
     }
-    Ok(json!({ "songs": written, "lyrics": lyrics_found }))
+    m.key = s.title.trim().to_string();
+    write(root, &m)
+}
+
+/// 前端对齐完的结果：content 有 = 对齐成功，写成新的 .lrc 并标「待核对」；没有 = 对齐失败，不写歌词，记下原因。
+/// 绝不覆盖已有的 .lrc
+pub fn lyrics_result(root: &Path, lib: &Library, tags: &Value, key: &str, content: Option<&str>, note: &str) -> Result<(), String> {
+    let s = find(lib, key)?;
+    match content {
+        Some(text) => {
+            if s.lyrics.is_some() || lyrics_path(root, key).exists() {
+                return Err("这首已经有歌词了，没有覆盖".into());
+            }
+            if tv::lrc_lines(text).is_empty() {
+                return Err("对齐出来的歌词没有时间".into());
+            }
+            crate::lyrics_store::save_lyrics(root, key, None, text).map_err(|e| e.to_string())?;
+            set_status(root, s, tags, &[("lyricsCheck", Some("pending")), ("lyricsNote", Some(note))])
+        }
+        None => set_status(root, s, tags, &[("lyricsCheck", Some("failed")), ("lyricsNote", Some(note))]),
+    }
+}
+
+/// 用户唱过确认歌词没问题：去掉「待核对」
+pub fn lyrics_confirm(root: &Path, lib: &Library, tags: &Value, key: &str) -> Result<(), String> {
+    set_status(root, find(lib, key)?, tags, &[("lyricsCheck", None), ("lyricsNote", None)])
 }
 
 /// 查完直接写（应用里的「AI 查」按钮）。返回 { songs: 查了几首, lyrics: 找到几首歌词 }
@@ -687,6 +784,24 @@ pub fn command(root: &Path, config: &Path, tv_cache: &Path, cmd: &str, args: &Va
             rename_apply(root, &lib, &tags(), &s("key").ok_or("缺少 key")?, &s("newKey").ok_or("缺少 newKey")?).map(Value::from)
         })(),
         "songs_migrate_plan" => scan().map(|lib| serde_json::to_value(migrate_plan(root, &lib, &tags(), &Value::Null)).unwrap_or_default()),
+"lyrics_search" => (|| {
+            let lib = scan()?;
+            let s = find(&lib, &s("key").ok_or("缺少 key")?)?;
+            let (m, _) = view(root, s, &tags())?;
+            // 应用的工具在配置目录 tools/；测试桥的在测试曲库 .tools/
+            let tools = [config.join("tools"), root.join(".tools")].into_iter().find(|t| video::Dirs { tools: t.clone(), work: tv_cache.to_path_buf() }.ffmpeg().is_file()).unwrap_or_else(|| config.join("tools"));
+            let dirs = video::Dirs { tools, work: tv_cache.to_path_buf() };
+            Ok(match search_lyrics(root, s, &m, &|p: &Path| video::media_info(&dirs, p).duration)? {
+                LyricsFound::Written => json!({ "written": true }),
+                LyricsFound::Pending(p) => json!({ "pending": p }),
+                LyricsFound::NotFound => json!({ "notFound": true }),
+            })
+        })(),
+        "lyrics_result" => (|| {
+            let lib = scan()?;
+            lyrics_result(root, &lib, &tags(), &s("key").ok_or("缺少 key")?, args.get("content").and_then(Value::as_str), &s("note").unwrap_or_default()).map(|_| Value::Null)
+        })(),
+        "lyrics_confirm" => scan().and_then(|lib| lyrics_confirm(root, &lib, &tags(), &s("key").ok_or("缺少 key")?)).map(|_| Value::Null),
         "songs_migrate" => scan().and_then(|lib| migrate_apply(root, &lib, &tags(), &Value::Null)).map(Value::from),
         _ => return None,
     };
@@ -841,6 +956,32 @@ mod tests {
         assert!(rows.iter().find(|r| r.key == "甲").unwrap().tv_lyrics_stale);
         assert!(!rows.iter().find(|r| r.key == "乙").unwrap().tv_lyrics_stale);
         drop(lib);
+    }
+
+    #[test]
+    fn aligned_lyrics_written_only_when_missing_and_failures_write_nothing() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let lib = lib_with(root, &["甲 - 伴奏.wav", "乙 - 伴奏.wav", "乙.lrc"]);
+        // 对齐失败：不写歌词，记下原因
+        lyrics_result(root, &lib, &Value::Null, "甲", None, "人声里没识别出字").unwrap();
+        assert!(!root.join("甲.lrc").exists());
+        let m = read(root, "甲").unwrap().unwrap();
+        assert_eq!((m.text("lyricsCheck"), m.text("lyricsNote")), (Some("failed"), Some("人声里没识别出字")));
+        // 对齐成功：写新的 .lrc，标待核对
+        lyrics_result(root, &lib, &Value::Null, "甲", Some("[00:12.30]第一句"), "按人声重新对过时间").unwrap();
+        assert_eq!(fs::read_to_string(root.join("甲.lrc")).unwrap(), "[00:12.30]第一句");
+        assert_eq!(read(root, "甲").unwrap().unwrap().text("lyricsCheck"), Some("pending"));
+        // 已经有歌词的绝不覆盖
+        assert!(lyrics_result(root, &lib, &Value::Null, "乙", Some("[00:01.00]新的"), "").is_err());
+        assert_eq!(fs::read_to_string(root.join("乙.lrc")).unwrap(), "x");
+        let lib2 = library::scan_dir(root).unwrap();
+        assert!(lyrics_result(root, &lib2, &Value::Null, "甲", Some("[00:01.00]再来"), "").is_err());
+        // 用户确认后去掉待核对；用户填的不受影响
+        lyrics_confirm(root, &lib2, &Value::Null, "甲").unwrap();
+        let m = read(root, "甲").unwrap().unwrap();
+        assert_eq!(m.text("lyricsCheck"), None);
+        assert!(!m.by.contains_key("lyricsCheck"));
     }
 
     #[test]

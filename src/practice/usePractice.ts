@@ -4,7 +4,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isBluetoothLabel, listInputs, pickDefaultInput } from "../audio/recorder";
+import { isBluetoothLabel } from "../audio/recorder";
+import { missingNotice, resolveMic } from "../audio/micChoice";
 import type { Settings } from "../settings";
 import {
   type ExerciseId,
@@ -27,6 +28,7 @@ import type { PitchFrame } from "./pitchTracker";
 import type { ExerciseResult } from "./practiceLog";
 import practiceUrl from "./practiceWorklet.ts?worker&url";
 import { playChord, playNote } from "./tones";
+import { outputFor } from "../audio/outputRoute";
 
 export interface Target {
   midi: number;
@@ -70,6 +72,7 @@ export function usePractice({ settings, range, onResult, onRange }: Options) {
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState<{ midi: number; rms: number }>({ midi: NaN, rms: 0 });
   const [micLabel, setMicLabel] = useState("");
+  const [micMissing, setMicMissing] = useState<string | null>(null);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const outRef = useRef<GainNode | null>(null);
@@ -98,16 +101,17 @@ export function usePractice({ settings, range, onResult, onRange }: Options) {
     await ctx.resume();
     if (!outRef.current) {
       outRef.current = ctx.createGain();
-      outRef.current.connect(ctx.destination);
+      outRef.current.connect(outputFor(ctx));
     }
     if (!streamRef.current) {
-      const inputs = await listInputs().catch(() => []);
-      const mic = inputs.find((d) => d.deviceId === settings.liveMicId && !d.bluetooth) ?? pickDefaultInput(inputs);
-      if (!mic) throw new Error("没有找到可用的麦克风（蓝牙耳机的麦克风不能用）。接好麦克风再来练。");
+      // 用设置里统一的「麦克风」；记住的没插上就用系统默认，并说出来
+      const plan = await resolveMic(settings.inputDevice);
+      if (plan.inputs.length === 0) throw new Error("没有找到可用的麦克风。接好麦克风再来练。");
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: mic.deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        audio: { deviceId: plan.deviceId ? { exact: plan.deviceId } : undefined, echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
       const label = stream.getAudioTracks()[0]?.label ?? "";
+      setMicMissing(plan.missing ? missingNotice(plan.missing, label) : null);
       if (isBluetoothLabel(label)) {
         stream.getTracks().forEach((t) => t.stop());
         throw new Error("不能用蓝牙耳机（AirPods）的麦克风练声，请换外接麦克风。");
@@ -134,7 +138,7 @@ export function usePractice({ settings, range, onResult, onRange }: Options) {
       latencyRef.current = (settings.recordLatency[name] ?? settings.outputLatencyMs + 10) / 1000;
     }
     return ctx;
-  }, [settings.liveMicId, settings.recordLatency, settings.outputLatencyMs]);
+  }, [settings.inputDevice, settings.recordLatency, settings.outputLatencyMs]);
 
   const closeAudio = useCallback(() => {
     nodeRef.current?.disconnect();
@@ -419,6 +423,8 @@ export function usePractice({ settings, range, onResult, onRange }: Options) {
     error,
     live,
     micLabel,
+    /** 记住的麦克风没插上（现在用的是系统默认）时的提示 */
+    micMissing,
     now,
     latency: () => latencyRef.current,
     frames: () => framesRef.current,

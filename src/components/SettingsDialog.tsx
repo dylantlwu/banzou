@@ -8,7 +8,10 @@ import type { Settings } from "../settings";
 import { type UpdateInfo, checkForUpdate, currentVersion, describeUpdateError } from "../update/updater";
 import { NetworkSettings } from "../net/NetworkSettings";
 import { AiSettings } from "./AiSettings";
+import { MicSelect } from "./MicSelect";
+import { OUTPUT_HINT, OutputSelect } from "./OutputSelect";
 import { Btn } from "./Btn";
+import { outputFor, routeExtraMs } from "../audio/outputRoute";
 
 /** 设置分页（v10）：以后加东西只多一页 */
 export type SettingsTab = "general" | "audio" | "ai" | "network" | "about";
@@ -77,7 +80,8 @@ export function SettingsDialog({ initialTab = "general", settings, onChange, onC
         {calibrating ? (
           <Calibration
             onDone={(ms) => {
-              onChange({ outputLatencyMs: ms });
+              // 测到的是耳朵听到的总延迟；选定出声设备多出来的那段另算（routeExtraMs），这里只记耳机本身的
+              onChange({ outputLatencyMs: Math.max(0, ms - routeExtraMs()) });
               setCalibrating(false);
             }}
             onCancel={() => setCalibrating(false)}
@@ -101,6 +105,22 @@ export function SettingsDialog({ initialTab = "general", settings, onChange, onC
 
             {tab === "audio" && (
             <>
+            <div className="field">
+              <label>麦克风</label>
+              <div className="field-row">
+                <MicSelect value={settings.inputDevice} onChange={(v) => onChange({ inputDevice: v })} />
+              </div>
+              <p className="muted small">录音、校准、练声、直播都用这一个。按名字记住；它没插上时用系统默认的麦克风，并在用的地方提示。</p>
+            </div>
+
+            <div className="field">
+              <label>出声设备</label>
+              <div className="field-row">
+                <OutputSelect value={settings.outputDevice} onChange={(v) => onChange({ outputDevice: v })} />
+              </div>
+              <p className="muted small">播放、老师说话、耳返、练声、校准都从这里出声，系统里切设备不影响。{OUTPUT_HINT}</p>
+            </div>
+
             <div className="field">
               <label htmlFor="latency">耳机延迟</label>
               <div className="field-row">
@@ -215,7 +235,7 @@ function Calibration({ onDone, onCancel }: { onDone: (ms: number) => void; onCan
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(0.5, t + 0.002);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-      osc.connect(gain).connect(ctx.destination);
+      osc.connect(gain).connect(outputFor(ctx));
       osc.start(t);
       osc.stop(t + 0.08);
     }

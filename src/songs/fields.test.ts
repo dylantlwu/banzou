@@ -90,3 +90,13 @@ it("电视上的歌词旧了：提示同步电视", () => {
   expect(g.map((x) => x.def.key)).toEqual(["tvLyrics"]);
   expect(g[0].fix).toEqual(["tvSync"]);
 });
+
+it("歌词待核对和对齐失败的原因能在资料检查里看到", () => {
+  const meta = { schema: 1, id: "1", key: "甲", artist: "乙", lang: "国语", era: "10s", note: "x", track: "y" };
+  const pendingGap = gaps(state({}, { meta: { ...meta, lyricsCheck: "pending", lyricsNote: "对上 30/40 句" } }));
+  expect(pendingGap.map((g) => g.def.key)).toEqual(["lyricsCheck"]);
+  expect(pendingGap[0].fix).toEqual(["singCheck", "confirmLyrics"]);
+  const failed = state({ lyrics: null }, { meta: { ...meta, lyricsCheck: "failed", lyricsNote: "人声里没识别出字" }, lyricsTimed: false });
+  const g = gaps(failed).find((x) => x.def.key === "lyrics")!;
+  expect(typeof g.def.missing === "function" && g.def.missing(failed)).toBe("缺歌词（人声里没识别出字）");
+});

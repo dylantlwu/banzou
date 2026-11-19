@@ -191,7 +191,10 @@ export function PracticePage({ settings, onExit }: Props) {
         </span>
         <span className="spacer" />
         {st > 0 && <span className="small streak">🔥 连续 {st} 天</span>}
-        <span className="muted small">{api.micLabel && `麦克风：${api.micLabel}`}</span>
+        <span className="muted small" title="换麦克风：设置 → 耳机与录音，或播放栏「声音 ▾」">
+          {api.micLabel && `麦克风：${api.micLabel}`}
+        </span>
+        {api.micMissing && <span className="error-text small">{api.micMissing}</span>}
       </div>
 
       <div className="practice-body">

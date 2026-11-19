@@ -1,4 +1,4 @@
-import { installFakeOutputs } from "./fakeOutputs";
+import { fakeInputs, installFakeOutputs } from "./fakeOutputs";
 
 /**
  * 浏览器测试模式（开发服务器 + 地址带 ?test）。
@@ -58,18 +58,18 @@ export function installFakeMic() {
 
   let singer: AudioBufferSourceNode | null = null;
   const md = navigator.mediaDevices;
-  md.getUserMedia = async () => {
+  // 假麦克风名单在 fakeOutputs.ts（能拔插）；要哪个就把轨道名字设成哪个，不给 deviceId 就是系统默认（第一个插着的）
+  md.getUserMedia = async (c?: MediaStreamConstraints) => {
     if (!appCtx) throw new Error("fake mic: 还没有 AudioContext");
+    const want = ((c?.audio as MediaTrackConstraints | undefined)?.deviceId as { exact?: string } | undefined)?.exact;
+    const dev = want ? fakeInputs().find((d) => d.uid === want) : fakeInputs()[0];
+    if (!dev) throw new Error("OverconstrainedError: 这个麦克风不在了");
     dest ??= appCtx.createMediaStreamDestination();
     const track = dest.stream.getAudioTracks()[0];
-    Object.defineProperty(track, "label", { value: "假麦克风（测试）" });
+    Object.defineProperty(track, "label", { value: dev.name, configurable: true });
     return dest.stream;
   };
-  md.enumerateDevices = async () =>
-    [
-      { deviceId: "fake", kind: "audioinput", label: "假麦克风（测试）", groupId: "g", toJSON() {} },
-      { deviceId: "airpods", kind: "audioinput", label: "小明的AirPods Pro", groupId: "h", toJSON() {} },
-    ] as MediaDeviceInfo[];
+  md.enumerateDevices = async () => fakeInputs().map((d) => ({ deviceId: d.uid, kind: "audioinput", label: d.name, groupId: d.uid, toJSON() {} })) as MediaDeviceInfo[];
 
   // 练声：按引擎给的提示「唱」——音阶 / 长音 / 听音唱一个偏高 15 音分的音，气息发一段噪声
   window.addEventListener("banzou-practice-expect", (e) => {

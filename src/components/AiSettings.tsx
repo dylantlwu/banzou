@@ -4,6 +4,7 @@ import { TeacherNotes } from "../learn/TeacherNotes";
 import { type Note as TeacherNote, loadNotes } from "../learn/api";
 import { followMasterVolume } from "../audio/masterVolume";
 import { Btn } from "./Btn";
+import { routeElement } from "../audio/outputRoute";
 
 /** 后端 ai::AiStatus：key 只给末四位 */
 interface AiStatus {
@@ -132,6 +133,7 @@ export function AiSettings() {
       const audio = followMasterVolume(new Audio(`data:audio/mpeg;base64,${r.audio}`));
       audioRef.current = audio;
       setVoiceNote({ text: `合成用了 ${secs(r.ms)}，正在播放：${SAMPLE_LINE}` });
+      await routeElement(audio);
       await audio.play();
     } catch (e) {
       setVoiceNote({ text: String(e), error: true });

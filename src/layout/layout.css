@@ -1125,3 +1125,14 @@ body.resizing-y * {
 .vol input[type="range"]:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* 「声音 ▾」最下面：麦克风（PRD 4.0） */
+.sound-devices {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.sound-select {
+  flex: 1;
+}

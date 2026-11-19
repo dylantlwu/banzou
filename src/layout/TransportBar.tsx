@@ -34,6 +34,8 @@ export interface SoundProps {
   acc: Slider | null;
   vocal: (Slider & { title?: string }) | null;
   transpose: { value: number; onChange: (st: number) => void; disabled?: boolean } | null;
+  /** 最下面一节：麦克风（以后还有出声设备），所有录音的地方共用 */
+  devices?: ReactNode;
 }
 
 interface Props {
@@ -195,7 +197,8 @@ function SoundMenu(s: SoundProps) {
               </span>
             </div>
           )}
-          {!s.acc && !s.vocal && !s.transpose && s.sources.length <= 1 && <p className="pop-note muted small">这个音源没有可调的</p>}
+          {!s.acc && !s.vocal && !s.transpose && s.sources.length <= 1 && !s.devices && <p className="pop-note muted small">这个音源没有可调的</p>}
+          {s.devices && <div className="sound-devices">{s.devices}</div>}
         </>
       )}
     </Popover>

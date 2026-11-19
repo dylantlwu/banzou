@@ -120,6 +120,12 @@ fn run_streaming(dirs: &Dirs, job: &mut video::Job, cmd: &mut Command, mut on_li
     Ok(log)
 }
 
+/// Demucs 的模型下过没有（torch.hub 缓存在 ~/.cache/torch/hub/checkpoints/*.th）
+fn model_cached() -> bool {
+    let dir = dirs::home_dir().unwrap_or_default().join(".cache/torch/hub/checkpoints");
+    fs::read_dir(dir).is_ok_and(|mut it| it.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "th"))))
+}
+
 /// 安装 Demucs：建虚拟环境，pip 装 demucs 和 soundfile（PyTorch 跟着装，约 1 GB）
 pub fn install(dirs: &Dirs) -> Result<SepStatus, String> {
     if !status(dirs).has_python {
@@ -132,13 +138,13 @@ pub fn install(dirs: &Dirs) -> Result<SepStatus, String> {
         let _ = fs::remove_dir_all(&dir);
         run_streaming(dirs, &mut job, Command::new(SYSTEM_PYTHON).args(["-m", "venv"]).arg(&dir), |_, _| false).map_err(|e| format!("建 Python 环境失败：{e}"))?;
         job.text = "升级 pip".into();
-        run_streaming(dirs, &mut job, Command::new(python(dirs)).args(["-m", "pip", "install", "-q", "--disable-pip-version-check", "--upgrade", "pip"]), |_, _| false)
+        run_streaming(dirs, &mut job, Command::new(python(dirs)).args(["-m", "pip", "install", "-q", "--disable-pip-version-check", "--upgrade", "pip"]).envs(crate::net::dns_proxy_env("https://pypi.org")), |_, _| false)
             .map_err(|e| format!("升级 pip 失败：{e}"))?;
         job.text = "下载 Demucs 和 PyTorch（约 1 GB）".into();
         run_streaming(
             dirs,
             &mut job,
-            Command::new(python(dirs)).args(["-m", "pip", "install", "--disable-pip-version-check", "--progress-bar", "off", "demucs", "soundfile"]),
+            Command::new(python(dirs)).args(["-m", "pip", "install", "--disable-pip-version-check", "--progress-bar", "off", "demucs", "soundfile"]).envs(crate::net::dns_proxy_env("https://pypi.org")),
             |job, line| {
                 // 「Downloading torch-2.8.0-…whl (74.7 MB)」→ 显示正在下哪个包
                 let l = line.trim();
@@ -268,7 +274,9 @@ pub fn run(dirs: &Dirs, root: &Path, source: &str, name: &str) -> Result<Separat
                 .arg(tmp.join("sep"))
                 .arg(&wav)
                 .env("PYTORCH_ENABLE_MPS_FALLBACK", "1")
-                .env("PYTHONUNBUFFERED", "1"),
+                .env("PYTHONUNBUFFERED", "1")
+                // 模型还没下过、系统 DNS 又被污染时，下载模型走本机解析代理（dns.rs）
+                .envs(if model_cached() { Vec::new() } else { crate::net::dns_proxy_env("https://dl.fbaipublicfiles.com") }),
             |job, line| apply_demucs_line(job, &mut state, line),
         )
         .map_err(|e| format!("分离失败：{e}"))?;

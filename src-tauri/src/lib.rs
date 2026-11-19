@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod audio_out;
+pub mod dns;
 pub mod dsp;
 pub mod learn;
 pub mod library;
@@ -179,7 +180,7 @@ fn selftest_enabled() -> bool {
     std::env::var("BANZOU_SELFTEST").is_ok_and(|v| v == "1")
 }
 
-/// 诊断：BANZOU_SELFTEST=output 时前端在真机上放一段轻音、记录切出声设备时声音有没有跟上（`src/audio/outputSelftest.ts`）
+/// 诊断：BANZOU_SELFTEST=output 时前端在真机上放一段轻音、记录切出声设备时声音有没有跟上（`src/audio/outputSelftest.ts`）；=route 时检查在应用里选定出声设备（`src/audio/routeSelftest.ts`）
 #[tauri::command]
 fn selftest_mode() -> String {
     std::env::var("BANZOU_SELFTEST").unwrap_or_default()
@@ -273,6 +274,19 @@ async fn audio_route() -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn audio_outputs() -> audio_out::OutputsSnapshot {
     audio_out::snapshot()
+}
+
+/// 收音设备列表和当前系统默认输入（只读）：「麦克风」选择用
+#[tauri::command]
+fn audio_inputs() -> audio_out::OutputsSnapshot {
+    audio_out::inputs()
+}
+
+/// 让页面里的 `window.__banzouApplySink()` 带着「用户手势」跑一次：WebKit 的 <audio>.setSinkId 要手势，
+/// 原生 evaluateJavaScript 默认就算手势（开应用时恢复上次选的出声设备也要用）
+#[tauri::command]
+fn audio_sink_gesture(webview: tauri::Webview) -> Result<(), String> {
+    webview.eval("window.__banzouApplySink && window.__banzouApplySink()").map_err(|e| e.to_string())
 }
 
 /// 用户在系统设置 / 控制中心里切了出声设备、或设备插拔了：发 `audio-output-changed` 给前端，播放器确认声音跟过去
@@ -828,6 +842,8 @@ pub fn run() {
             abnormal_recordings,
             audio_route,
             audio_outputs,
+            audio_inputs,
+            audio_sink_gesture,
             analyze_pitch,
             render_take,
             render_tuned,

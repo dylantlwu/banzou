@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type InputDevice, listInputs, pickDefaultInput, Recorder } from "../audio/recorder";
+import { Recorder } from "../audio/recorder";
+import { missingNotice, resolveMic } from "../audio/micChoice";
+import { MicSelect } from "../components/MicSelect";
+import { loadSettings, saveSettings } from "../settings";
 import { Btn, isTyping } from "../components/Btn";
 import { MarkedText } from "../learn/MarkedText";
 import "../App.css";
 import "./testset.css";
 import { encodeWav, KIND_HINT, KIND_LABEL, loadTestSet, nextOpen, progress, saveTake, skipItem, splitMistake, takeAudio, type TestSet } from "./testset";
+import { routeElement } from "../audio/outputRoute";
 
 /** 一句最长录多久（秒），忘了停也不会一直录 */
 const MAX_SECONDS = 60;
@@ -22,8 +26,9 @@ export function TestSetRecorder() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
-  const [devices, setDevices] = useState<InputDevice[]>([]);
-  const [deviceId, setDeviceId] = useState<string>("");
+  /** 设置里统一的「麦克风」（和录音、练声、直播同一个） */
+  const [choice, setChoice] = useState<string | null>(null);
+  const [micNote, setMicNote] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const rec = useRef<Recorder | null>(null);
   const chunks = useRef<Float32Array[]>([]);
@@ -31,6 +36,9 @@ export function TestSetRecorder() {
   const player = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    loadSettings()
+      .then((s) => setChoice(s.inputDevice))
+      .catch(() => setChoice(""));
     loadTestSet()
       .then((s) => {
         setSet(s);
@@ -55,12 +63,18 @@ export function TestSetRecorder() {
   const item = set?.items[index];
   const record = item ? set?.records[item.id] : undefined;
 
-  const openMic = async (id?: string) => {
+  const openMic = async (c: string) => {
     if (!rec.current) rec.current = new Recorder(new AudioContext());
-    await rec.current.open(id || undefined);
-    const list = await listInputs();
-    setDevices(list);
-    if (!id) setDeviceId(list.find((d) => d.label === rec.current?.label)?.deviceId ?? pickDefaultInput(list)?.deviceId ?? "");
+    const plan = await resolveMic(c);
+    await rec.current.open(plan.deviceId);
+    setMicNote(plan.missing ? missingNotice(plan.missing, rec.current.label) : null);
+  };
+
+  const changeMic = async (v: string) => {
+    setChoice(v);
+    const s = await loadSettings();
+    await saveSettings({ ...s, inputDevice: v });
+    if (rec.current?.isOpen) await openMic(v);
   };
 
   const stop = useCallback(async () => {
@@ -89,7 +103,7 @@ export function TestSetRecorder() {
     setNote(null);
     player.current?.pause();
     try {
-      if (!rec.current?.isOpen) await openMic(deviceId);
+      if (!rec.current?.isOpen) await openMic(choice ?? "");
     } catch (e) {
       setNote(`打不开麦克风：${String(e)}`);
       return;
@@ -141,6 +155,7 @@ export function TestSetRecorder() {
       const url = URL.createObjectURL(new Blob([wav.slice().buffer], { type: "audio/wav" }));
       player.current = new Audio(url);
       player.current.onended = () => URL.revokeObjectURL(url);
+      await routeElement(player.current);
       await player.current.play();
     } catch (e) {
       setNote(String(e));
@@ -261,22 +276,9 @@ export function TestSetRecorder() {
       <footer className="ts-foot small muted">
         <span>
           麦克风：
-          <select
-            value={deviceId}
-            onChange={(e) => {
-              setDeviceId(e.target.value);
-              void openMic(e.target.value).catch((err) => setNote(`打不开麦克风：${String(err)}`));
-            }}
-            disabled={phase !== "idle"}
-          >
-            {devices.length === 0 && <option value="">第一次录音时打开</option>}
-            {devices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId} disabled={d.bluetooth}>
-                {d.label}
-                {d.bluetooth ? "（蓝牙，不能用）" : ""}
-              </option>
-            ))}
-          </select>
+          {choice !== null && <MicSelect value={choice} disabled={phase !== "idle"} onChange={(v) => void changeMic(v).catch((err) => setNote(`打不开麦克风：${String(err)}`))} />}
+          {rec.current?.isOpen && rec.current.label && <span> 现在：{rec.current.label}</span>}
+          {micNote && <span className="error-text"> {micNote}</span>}
         </span>
         <span className="ts-level" aria-label="输入电平">
           <span style={{ width: `${Math.min(100, Math.round(level * 140))}%` }} />

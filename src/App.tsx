@@ -16,6 +16,10 @@ import { TunePage } from "./components/TunePage";
 import { takeTracks } from "./takes/takes";
 import { useRecording } from "./takes/useRecording";
 import { useFollowOutput } from "./audio/useFollowOutput";
+import { MicSelect } from "./components/MicSelect";
+import { OUTPUT_HINT, OutputSelect } from "./components/OutputSelect";
+import { useOutputRouting } from "./audio/useOutputRoute";
+import { routeNotice } from "./audio/outputRoute";
 import { useTakes } from "./takes/useTakes";
 import { UpdateCard } from "./components/UpdateCard";
 import { type UpdateInfo, checkForUpdate, shouldAutoCheck } from "./update/updater";
@@ -23,6 +27,7 @@ import { SettingsDialog } from "./components/SettingsDialog";
 import { TagsDialog } from "./components/TagsDialog";
 import { CheckDialog } from "./songs/CheckDialog";
 import { songName } from "./songs/meta";
+import { type PendingLyrics, finishAllPending } from "./songs/lyricsCandidates";
 import { SongInfoDialog } from "./songs/SongInfoDialog";
 import { type TagStore, displayArtist, langEraLine, loadTags, normalizeStore, songId } from "./tags";
 import { TvDialog } from "./components/TvDialog";
@@ -148,9 +153,10 @@ export default function App() {
       try {
         if (!(await invoke<boolean>("ai_key_status"))) return;
         setTagBusy("打标签中…");
-        const r = await invoke<{ songs: number; lyrics: number }>("ai_tag_songs", { retag: false, titles: [title], hints: hint ? { [title]: hint } : null });
+        const r = await invoke<{ songs: number; lyrics: number; pendingLyrics?: PendingLyrics[] }>("ai_tag_songs", { retag: false, titles: [title], hints: hint ? { [title]: hint } : null });
         setTags(await loadTags());
-        if (r.lyrics > 0) setLibrary(await invoke<Library>("scan_library"));
+        const aligned = r.pendingLyrics?.length ? await finishAllPending(r.pendingLyrics, (await invoke<Library>("scan_library")).songs) : [];
+        if (r.lyrics > 0 || aligned.length > 0) setLibrary(await invoke<Library>("scan_library"));
       } catch (e) {
         console.warn("自动打标签没成功", e);
       } finally {
@@ -527,9 +533,13 @@ export default function App() {
   canRebuildAudio.current = rec.phase === "idle" && goLive.phase !== "live";
   const ensureOutput = player.ensureOutput;
   useFollowOutput(() => void ensureOutput(canRebuildAudio.current));
+  // 在波点里选定的出声设备（outputRoute）：选定时多一段延迟，歌词、打轴都要补上
+  const outRoute = useOutputRouting(settings.outputDevice);
+  const outLatencyMs = settings.outputLatencyMs + outRoute.extraMs;
+  const outNotice = routeNotice(outRoute);
 
   /** 耳朵当前听到的歌曲时间（只有播放中声音才在耳机路上，暂停时不扣延迟） */
-  const heard = player.playing ? player.position - (settings.outputLatencyMs / 1000) * player.rate : player.position;
+  const heard = player.playing ? player.position - (outLatencyMs / 1000) * player.rate : player.position;
 
   // ---------- 音高窗口（原唱音高 + 我唱的） ----------
   const pitchVocal = settings.showPitch && (mode === "sing" || mode === "record") && hasVocal ? selected!.vocals[0].path : null;
@@ -550,8 +560,8 @@ export default function App() {
   }, [pitchVocal]);
   const pitchStatus = !refPitch || refPitch.path !== pitchVocal ? "正在分析原唱音高…" : refPitch.error ?? (refPitch.ref ? null : "正在分析原唱音高…（第一次要几秒）");
   const getHeard = useCallback(
-    () => (player.playing ? player.getPosition() - (settings.outputLatencyMs / 1000) * player.rate : player.getPosition()),
-    [player, settings.outputLatencyMs],
+    () => (player.playing ? player.getPosition() - (outLatencyMs / 1000) * player.rate : player.getPosition()),
+    [player, outLatencyMs],
   );
   const liveInput = useMemo<LiveInput | null>(
     () =>
@@ -791,6 +801,7 @@ export default function App() {
       {transposeError && <span className="error-text">{transposeError}</span>}
       {player.load.kind === "loading" && "正在加载…"}
       {player.load.kind === "error" && <span className="error-text">{player.load.message}</span>}
+      {outNotice && <span className="error-text">{outNotice}</span>}
       {player.load.kind === "ready" && singLike && settings.outputLatencyMs === 0 && lyricsDoc && (
         <Btn className="link" onClick={() => openSettings("audio")}>
           戴 AirPods？校准耳机延迟让歌词更准
@@ -798,7 +809,7 @@ export default function App() {
       )}
     </>
   );
-  const hasStatus = transposing || !!transposeError || player.load.kind === "loading" || player.load.kind === "error" || (player.load.kind === "ready" && singLike && settings.outputLatencyMs === 0 && !!lyricsDoc);
+  const hasStatus = !!outNotice || transposing || !!transposeError || player.load.kind === "loading" || player.load.kind === "error" || (player.load.kind === "ready" && singLike && settings.outputLatencyMs === 0 && !!lyricsDoc);
 
   return (
     <div className={["app shell", big ? "big" : "", mode === "practice" ? "practice-mode" : ""].filter(Boolean).join(" ")}>
@@ -1103,6 +1114,19 @@ export default function App() {
                           }
                         : null,
                     transpose: source?.kind === "accompaniment" ? { value: transpose, onChange: setSongTranspose, disabled: recBusy } : null,
+                    devices: (
+                      <>
+                        <label className="sound-row" title="录音、校准、练声、直播都用这一个">
+                          <span>麦克风</span>
+                          <MicSelect className="sound-select" value={settings.inputDevice} onChange={(v) => updateSettings({ inputDevice: v })} disabled={recBusy} />
+                        </label>
+                        <label className="sound-row" title="播放、老师说话、耳返、练声、校准都从这里出声，系统里切设备不影响">
+                          <span>出声</span>
+                          <OutputSelect className="sound-select" value={settings.outputDevice} onChange={(v) => updateSettings({ outputDevice: v })} disabled={recBusy} />
+                        </label>
+                        <p className="pop-note muted small">{outNotice ? <span className="error-text">{outNotice}</span> : OUTPUT_HINT}</p>
+                      </>
+                    ),
                   }
                 : null
             }

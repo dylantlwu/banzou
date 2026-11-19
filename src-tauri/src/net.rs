@@ -164,6 +164,27 @@ pub fn curl_args(dir: &Path, url: &str) -> Vec<String> {
     direct_interface(dir, url).map(|i| vec!["--interface".to_string(), i]).unwrap_or_default()
 }
 
+/// 国外服务（默认跟系统走的）在系统 DNS 被污染时，返回本机解析代理的地址（见 dns.rs）；
+/// 没被污染、不在表里、或是直连的国内服务都返回 None，照原样连。
+/// 第一次用（或结论过期）会先测一下，被污染时要多等几秒
+pub fn dns_proxy(url: &str) -> Option<String> {
+    let def = def_for(url).filter(|d| d.route == Route::System)?;
+    if crate::dns::verdict(def.id, def.url) != crate::dns::Verdict::Poisoned {
+        return None;
+    }
+    crate::dns::proxy_url().ok()
+}
+
+/// curl 要加的参数（DNS 被污染时 `--proxy 本机解析代理`）。不能和 `--interface` 一起用
+pub fn dns_curl_args(url: &str) -> Vec<String> {
+    dns_proxy(url).map(|p| vec!["--proxy".to_string(), p]).unwrap_or_default()
+}
+
+/// 给 pip、Python 等子进程的环境变量（DNS 被污染时 HTTPS_PROXY=本机解析代理）
+pub fn dns_proxy_env(url: &str) -> Vec<(&'static str, String)> {
+    dns_proxy(url).map(|p| vec![("HTTPS_PROXY", p.clone()), ("https_proxy", p)]).unwrap_or_default()
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestResult {
@@ -175,6 +196,8 @@ pub struct TestResult {
     /// 直连不通、改走系统路由才通
     pub fell_back: bool,
     pub error: Option<String>,
+    /// 系统 DNS 被污染、已自动绕开时的一句说明
+    pub dns: Option<String>,
 }
 
 /// 连一下（只要服务器有回应就算通，不管返回什么状态码）
@@ -215,17 +238,39 @@ pub fn test(dir: &Path, id: &str) -> Result<TestResult, String> {
     let iface = (route == Route::Direct).then(physical_interface).flatten();
     if route == Route::Direct && iface.is_none() {
         let (ok, ms, error) = probe(def.url, None);
-        return Ok(TestResult { id: id.into(), ok, via: Route::System, ms, fell_back: true, error: error.or(Some("找不到 Wi-Fi / 网线网卡".into())) });
+        return Ok(TestResult { id: id.into(), ok, via: Route::System, ms, fell_back: true, error: error.or(Some("找不到 Wi-Fi / 网线网卡".into())), dns: None });
     }
     let (ok, ms, error) = probe(def.url, iface.as_deref());
     if iface.is_some() {
         note_direct(def.url, ok);
     }
     if ok || iface.is_none() {
-        return Ok(TestResult { id: id.into(), ok, via: route, ms, fell_back: false, error });
+        let mut r = TestResult { id: id.into(), ok, via: route, ms, fell_back: false, error, dns: None };
+        dns_check(def, &mut r);
+        return Ok(r);
     }
     let (ok2, ms2, error2) = probe(def.url, None);
-    Ok(TestResult { id: id.into(), ok: ok2, via: Route::System, ms: ms + ms2, fell_back: true, error: if ok2 { None } else { error2.or(error) } })
+    Ok(TestResult { id: id.into(), ok: ok2, via: Route::System, ms: ms + ms2, fell_back: true, error: if ok2 { None } else { error2.or(error) }, dns: None })
+}
+
+/// 国外服务按系统路由测完：通了记下「DNS 没问题」；不通再分清是 DNS 被污染（已自动绕开）还是网络不通
+fn dns_check(def: &Def, r: &mut TestResult) {
+    if def.route != Route::System || r.via != Route::System {
+        return;
+    }
+    if r.ok {
+        crate::dns::remember(def.id, crate::dns::Verdict::Ok);
+        return;
+    }
+    let started = Instant::now();
+    let (verdict, say) = crate::dns::check_after_fail(def.url);
+    crate::dns::remember(def.id, verdict);
+    r.ms += started.elapsed().as_millis() as u64;
+    if verdict == crate::dns::Verdict::Poisoned {
+        (r.ok, r.error, r.dns) = (true, None, Some(say));
+    } else {
+        r.error = Some(say);
+    }
 }
 
 #[cfg(test)]
@@ -268,6 +313,14 @@ mod tests {
         assert_eq!(direct_interface(dir.path(), url), None);
         note_direct(url, true);
         assert!(!direct_failed_recently(url));
+    }
+
+    #[test]
+    fn dns_fix_never_touches_direct_or_unlisted() {
+        // 直连的国内服务、不在表里的地址：不测、不走解析代理（这里不会发任何网络请求）
+        assert_eq!(dns_proxy("https://openspeech.bytedance.com/api/v3/tts/unidirectional"), None);
+        assert!(dns_curl_args("https://example.org/x").is_empty());
+        assert!(dns_proxy_env("https://notbytedance.com").is_empty());
     }
 
     #[test]

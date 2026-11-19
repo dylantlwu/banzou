@@ -6,7 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TimelineEvent } from "../audio/engine";
 import { estimateLagSpans, envelopeOf, measureRoundTrip } from "../audio/recordAlign";
-import { type InputDevice, Recorder, floatsToBase64, listInputs, pickDefaultInput } from "../audio/recorder";
+import { type InputDevice, Recorder, floatsToBase64 } from "../audio/recorder";
+import { missingNotice, resolveMic } from "../audio/micChoice";
 import type { Player } from "../player/usePlayer";
 import type { Settings } from "../settings";
 import type { Song } from "../types";
@@ -15,6 +16,8 @@ import { AUTO_STOP_NOTICE, overRecordLimit } from "./recordGuard";
 import { clipsFromSpans, coveredSeconds, overlay, spansFromEvents } from "./recordSpans";
 import { type Take, newTakeId, nextTakeName, punchIn } from "./takes";
 import type { TakesApi } from "./useTakes";
+import { outputFor, recordRouteName } from "../audio/outputRoute";
+import { useOutputRoute } from "../audio/useOutputRoute";
 
 export type RecPhase = "idle" | "opening" | "prep" | "noise" | "countdown" | "recording" | "saving" | "calibrating";
 export type RecRange = "whole" | "here" | "punch";
@@ -78,9 +81,11 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
   const cancelRef = useRef(false);
   const stopRef = useRef<(() => void) | null>(null);
 
-  const routeName = route?.output?.name || "默认输出";
+  // 在波点里选定了出声设备时多一段延迟，和跟系统时分开记（recordRouteName）
+  const outRoute = useOutputRoute();
+  const routeName = recordRouteName(route?.output?.name);
   const calibrated = routeName in settings.recordLatency;
-  const latencyMs = settings.recordLatency[routeName] ?? settings.outputLatencyMs + 10;
+  const latencyMs = settings.recordLatency[routeName] ?? settings.outputLatencyMs + outRoute.extraMs + 10;
   const outputKind = route?.output?.kind ?? "unknown";
 
   // ---------- 准备 ----------
@@ -90,23 +95,18 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
     return r;
   }, []);
 
+  // 麦克风按设置里统一的「麦克风」打开（micChoice）；记住的没插上就用系统默认并说出来
+  const [micMissing, setMicMissing] = useState<string | null>(null);
   const openDevice = useCallback(
-    async (id: string | null) => {
+    async (choice: string) => {
       setPhase("opening");
       setError(null);
       try {
-        await recorder().open(id ?? undefined);
-        const list = await listInputs();
-        setInputs(list);
-        // 第一次打开时系统可能给的是蓝牙或别的设备：换成推荐的那个
-        const current = list.find((d) => d.label === recorder().label);
-        const preferred = pickDefaultInput(list);
-        if (!id && preferred && current?.deviceId !== preferred.deviceId) {
-          await recorder().open(preferred.deviceId);
-          setDeviceIdState(preferred.deviceId);
-        } else {
-          setDeviceIdState(current?.deviceId ?? id);
-        }
+        const plan = await resolveMic(choice);
+        await recorder().open(plan.deviceId);
+        setInputs(plan.inputs);
+        setMicMissing(plan.missing ? missingNotice(plan.missing, recorder().label) : null);
+        setDeviceIdState(plan.inputs.find((d) => d.label === recorder().label)?.deviceId ?? plan.deviceId ?? null);
         setPhase("prep");
       } catch (e) {
         const msg = e instanceof Error ? `${e.message}` : String(e);
@@ -120,10 +120,23 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
   const openPrep = useCallback(async () => {
     setNotice(null);
     void refreshRoute();
-    await openDevice(deviceId);
-  }, [refreshRoute, openDevice, deviceId]);
+    await openDevice(settings.inputDevice);
+  }, [refreshRoute, openDevice, settings.inputDevice]);
 
-  const setDeviceId = useCallback((id: string) => void openDevice(id), [openDevice]);
+  /** 录音栏里换麦克风：记进设置（所有录音的地方都用它），然后重新打开 */
+  const setDeviceId = useCallback(
+    (id: string) => {
+      const name = inputs.find((d) => d.deviceId === id)?.label;
+      if (!name) return;
+      updateSettings({ inputDevice: name });
+    },
+    [inputs, updateSettings],
+  );
+  // 设置里的麦克风换了（录音栏、「声音 ▾」、设置页都能换）：录音栏开着、还没开始录时马上换过去
+  useEffect(() => {
+    if (phaseRef.current === "prep") void openDevice(settings.inputDevice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.inputDevice]);
 
   const close = useCallback(() => {
     cancelRef.current = true;
@@ -402,7 +415,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
     const rec = recorderRef.current;
     if (!rec?.isOpen) return;
     const r = (await refreshRoute()) ?? route;
-    const name = r?.output?.name || "默认输出";
+    const name = recordRouteName(r?.output?.name);
     player.pause();
     setError(null);
     setNotice(null);
@@ -424,7 +437,7 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
       g.gain.setValueAtTime(0, t);
       g.gain.linearRampToValueAtTime(0.5, t + 0.002);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(outputFor(ctx));
       osc.start(t);
       osc.stop(t + 0.08);
     }
@@ -459,6 +472,8 @@ export function useRecording({ player, song, takes, settings, updateSettings, tr
     countdown,
     level,
     inputWarning,
+    /** 记住的麦克风没插上（现在用的是系统默认）时的提示 */
+    micMissing,
     monitor,
     setMonitor,
     openPrep,

@@ -168,7 +168,9 @@ pub fn tool_status(dirs: &Dirs) -> ToolStatus {
 /// 用系统自带的 curl 取一个小文件（JSON 等）
 pub(crate) fn curl_text(url: &str) -> Result<String, String> {
     let out = Command::new("/usr/bin/curl")
-        .args(["-fsSL", "--retry", "2", "--max-time", "30", "-H", "User-Agent: banzou", url])
+        .args(["-fsSL", "--retry", "2", "--max-time", "30", "-H", "User-Agent: banzou"])
+        .args(crate::net::dns_curl_args(url))
+        .arg(url)
         .output()
         .map_err(|e| format!("curl 启动失败：{e}"))?;
     if !out.status.success() {
@@ -188,7 +190,9 @@ pub(crate) fn curl_file(dirs: &Dirs, job: &mut Job, url: &str, dest: &Path, size
     }
     let _ = fs::remove_file(dest);
     let mut child = Command::new("/usr/bin/curl")
-        .args(["-fsSL", "--retry", "2", "--connect-timeout", "20", "-H", "User-Agent: banzou", "-o"])
+        .args(["-fsSL", "--retry", "2", "--connect-timeout", "20", "-H", "User-Agent: banzou"])
+        .args(crate::net::dns_curl_args(url))
+        .arg("-o")
         .arg(dest)
         .arg(url)
         .stderr(Stdio::piped())
@@ -516,6 +520,12 @@ pub fn friendly_error(raw: &str) -> String {
     msg.to_string()
 }
 
+/// 系统 DNS 把 YouTube 解析成假地址时，让 yt-dlp 走本机解析代理（dns.rs）：
+/// 它会临时连很多 googlevideo.com 下的动态域名，只有代理能把这些都解析对
+fn proxy_args(url: &str) -> Vec<String> {
+    crate::net::dns_proxy(url).map(|p| vec!["--proxy".to_string(), p]).unwrap_or_default()
+}
+
 fn need_tools(dirs: &Dirs) -> Result<(), String> {
     if !dirs.ytdlp().is_file() || !dirs.ffmpeg().is_file() {
         return Err("TOOLS_MISSING".into());
@@ -528,7 +538,9 @@ pub fn probe(dirs: &Dirs, input: &str) -> Result<VideoInfo, String> {
     need_tools(dirs)?;
     let url = clean_url(input)?;
     let out = Command::new(dirs.ytdlp())
-        .args(["-J", "--no-playlist", "--no-warnings", "--"])
+        .args(["-J", "--no-playlist", "--no-warnings"])
+        .args(proxy_args(&url))
+        .arg("--")
         .arg(&url)
         .stdin(Stdio::null())
         .output()
@@ -664,6 +676,7 @@ pub fn download(dirs: &Dirs, input: &str, quality: &str, out_dir: &Path) -> Resu
             .args(["-o", name])
             .args(["--print", "after_move:BZFILE %(filepath)s", "--no-simulate"])
             .args(["--progress", "--newline", "--no-mtime", "--no-warnings"])
+            .args(proxy_args(&url))
             .args([
                 "--progress-template",
                 "download:BZP %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(info.vcodec)s",

@@ -276,7 +276,9 @@ export function alignToTranscript(lines: LrcLine[], tokens: Token[], onsets: Ons
     }
     if (!trusted) continue;
 
-    const first = ps[0];
+    // 从第一个「对上」的字往前推句首：句首没对上的字可能被硬配到很远的地方
+    // （改编版多出一段歌词里没有的词时，「数」会配到那段开头的「时」上，整句提前 25 秒）
+    const first = ps.find((p) => p.equal) ?? ps[0];
     const unit = heard[first.heard];
     const durations = ps.map((p) => heard[p.heard].end - heard[p.heard].start).sort((a, b) => a - b);
     const perUnit = Math.min(0.6, Math.max(0.15, durations[Math.floor(durations.length / 2)]));
@@ -284,9 +286,11 @@ export function alignToTranscript(lines: LrcLine[], tokens: Token[], onsets: Ons
     // 识别会把句首字前面的停顿也算进这个字（比如「听」标成 21.8–25.0，其实 24.7 才开口），
     // 所以句首字的开口要在它时间段的后半找
     const stretched = unit.end - unit.start > 0.8;
-    let t = stretched && pos === 0 ? unit.end - perUnit : unit.start - pos * perUnit;
+    // 句中的字被拉长时，前面没听清的字（常常连上一句的尾巴）都并进了它，开头不可信，从它的结尾往前推
+    let t = stretched && pos === 0 ? unit.end - perUnit : stretched ? unit.end - (pos + 1) * perUnit : unit.start - pos * perUnit;
     // 用人声开口点微调：句首字的范围内找最明显的开口
-    const lo = pos === 0 ? Math.max(unit.start - 0.15, unit.end - 1) : t - 0.15;
+    // 句中拉长的字：从结尾往前推只是估计，在它的时间段里往前多找一点
+    const lo = pos === 0 ? Math.max(unit.start - 0.15, unit.end - 1) : stretched ? Math.max(unit.start, t - 1) : t - 0.15;
     const hi = pos === 0 ? unit.end - 0.05 : t + 0.3;
     let best: Onset | null = null;
     for (const o of onsets) {
@@ -311,7 +315,10 @@ export function alignToTranscript(lines: LrcLine[], tokens: Token[], onsets: Ons
     }),
   );
   const pairedHeard = new Map<number, number>(); // heard 下标 → 歌词行
-  for (const p of pairs) if (!weak.has(unitLine[p.lyric])) pairedHeard.set(p.heard, unitLine[p.lyric]);
+  // 错配的字离这句对上的字太远（隔了 2 秒以上），多半是硬凑的，也不算
+  const nearEqual = (p: Pair) =>
+    p.equal || (perLine.get(unitLine[p.lyric]) ?? []).some((q) => q.equal && Math.abs(heard[q.heard].start - heard[p.heard].start) <= 2);
+  for (const p of pairs) if (!weak.has(unitLine[p.lyric]) && nearEqual(p)) pairedHeard.set(p.heard, unitLine[p.lyric]);
   let run: HeardUnit[] = [];
   let runStart = -1;
   const sungPos = new Map(sungIdx.map((i, k) => [i, k]));
@@ -393,7 +400,10 @@ export function alignToTranscript(lines: LrcLine[], tokens: Token[], onsets: Ons
       const po = prev ? lines[prev[0]].time : null;
       const no = next ? lines[next[0]].time : null;
       if (prev && next && po !== null && no !== null && no > po) {
-        out[i].time = round(prev[1] + ((orig - po) / (no - po)) * (next[1] - prev[1]));
+        const scaled = prev[1] + ((orig - po) / (no - po)) * (next[1] - prev[1]);
+        // 空行（上一句唱完的地方）跟着上一句走，不按比例拉开：
+        // 后面多唱了一段歌词里没有的词时，按比例会把它推到那段中间
+        out[i].time = round(l.text === "" ? Math.min(scaled, prev[1] + Math.max(0, orig - po)) : scaled);
       } else if (prev && po !== null) {
         out[i].time = round(orig + (prev[1] - po));
       } else if (next && no !== null) {

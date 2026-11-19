@@ -1,4 +1,5 @@
-//! 出声设备（macOS CoreAudio）：列出能出声的设备、读系统默认输出、监听变化。只读，不改系统设置。
+//! 声音设备（macOS CoreAudio）：列出能出声 / 能收音的设备、读系统默认、监听变化。只读，不改系统设置。
+//! 收音设备的名字给「麦克风」选择用：WKWebView 在拿到麦克风权限之前列不出设备名。
 //!
 //! 波点的声音全走 WKWebView 里的 Web Audio，只能跟着系统默认输出走（WKWebView 的 AudioContext
 //! 没有 setSinkId）。用户在系统设置 / 控制中心里切设备时，这里发事件给前端，播放器确认声音跟过去了。
@@ -92,6 +93,7 @@ mod mac {
     const SYSTEM: AudioObjectID = 1;
     const GLOBAL: u32 = fourcc(b"glob");
     const OUTPUT: u32 = fourcc(b"outp");
+    const INPUT: u32 = fourcc(b"inpt");
 
     fn addr(selector: &[u8; 4], scope: u32) -> Address {
         Address { selector: fourcc(selector), scope, element: 0 }
@@ -152,27 +154,42 @@ mod mac {
         }
     }
 
-    fn describe(id: AudioObjectID) -> Option<OutputDevice> {
-        if stream_count(id, OUTPUT) == 0 {
+    fn describe(id: AudioObjectID, scope: u32) -> Option<OutputDevice> {
+        if stream_count(id, scope) == 0 {
             return None;
         }
-        // 不能当默认输出的（比如部分聚合设备的子设备）不列出来
-        if u32_prop(id, b"dflt", OUTPUT) == Some(0) {
+        // 不能当默认设备的（比如部分聚合设备的子设备）不列出来
+        if u32_prop(id, b"dflt", scope) == Some(0) {
             return None;
         }
         let uid = string_prop(id, b"uid ")?;
         let name = string_prop(id, b"lnam").unwrap_or_else(|| uid.clone());
         let transport = u32_prop(id, b"tran", GLOBAL).unwrap_or(0);
-        let source = u32_prop(id, b"ssrc", OUTPUT);
-        Some(OutputDevice { uid, name, kind: kind_of(transport, source).into() })
+        let source = u32_prop(id, b"ssrc", scope);
+        let kind = match kind_of(transport, source) {
+            // 内置的收音设备是麦克风，不是扬声器
+            "speaker" if scope == INPUT => "builtin",
+            k => k,
+        };
+        Some(OutputDevice { uid, name, kind: kind.into() })
     }
 
+    /// 能出声的设备 + 系统默认输出
     pub fn snapshot() -> OutputsSnapshot {
-        let def = u32_prop(SYSTEM, b"dOut", GLOBAL).filter(|&id| id != 0);
+        list(OUTPUT, b"dOut")
+    }
+
+    /// 能收音的设备 + 系统默认输入
+    pub fn inputs() -> OutputsSnapshot {
+        list(INPUT, b"dIn ")
+    }
+
+    fn list(scope: u32, default_selector: &[u8; 4]) -> OutputsSnapshot {
+        let def = u32_prop(SYSTEM, default_selector, GLOBAL).filter(|&id| id != 0);
         let mut default_uid = None;
         let mut devices = vec![];
         for id in device_ids() {
-            if let Some(d) = describe(id) {
+            if let Some(d) = describe(id, scope) {
                 if Some(id) == def {
                     default_uid = Some(d.uid.clone());
                 }
@@ -194,7 +211,7 @@ mod mac {
     /// 默认输出变了、设备插拔了都会回调（在 CoreAudio 的线程上）。只能注册一次。
     pub fn watch(f: Box<dyn Fn() + Send + Sync>) -> Result<(), String> {
         ON_CHANGE.set(f).map_err(|_| "已经在监听出声设备了".to_string())?;
-        for sel in [b"dOut", b"dev#"] {
+        for sel in [b"dOut", b"dIn ", b"dev#"] {
             let a = addr(sel, GLOBAL);
             let status = unsafe { AudioObjectAddPropertyListener(SYSTEM, &a, listener, std::ptr::null_mut()) };
             if status != 0 {
@@ -206,10 +223,14 @@ mod mac {
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{snapshot, watch};
+pub use mac::{inputs, snapshot, watch};
 
 #[cfg(not(target_os = "macos"))]
 pub fn snapshot() -> OutputsSnapshot {
+    OutputsSnapshot { devices: vec![], default_uid: None }
+}
+#[cfg(not(target_os = "macos"))]
+pub fn inputs() -> OutputsSnapshot {
     OutputsSnapshot { devices: vec![], default_uid: None }
 }
 #[cfg(not(target_os = "macos"))]
@@ -244,12 +265,13 @@ mod tests {
     #[test]
     fn snapshot_is_consistent() {
         // 只读：列出本机设备，默认设备（如果有）一定在列表里
-        let s = snapshot();
-        if let Some(uid) = &s.default_uid {
-            assert!(s.devices.iter().any(|d| &d.uid == uid));
+        for s in [snapshot(), inputs()] {
+            if let Some(uid) = &s.default_uid {
+                assert!(s.devices.iter().any(|d| &d.uid == uid));
+            }
+            let mut uids: Vec<_> = s.devices.iter().map(|d| d.uid.clone()).collect();
+            uids.dedup();
+            assert_eq!(uids.len(), s.devices.len());
         }
-        let mut uids: Vec<_> = s.devices.iter().map(|d| d.uid.clone()).collect();
-        uids.dedup();
-        assert_eq!(uids.len(), s.devices.len());
     }
 }

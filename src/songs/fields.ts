@@ -23,7 +23,9 @@ export type Fix =
   | "align" // 智能对齐（按原唱人声自动打时间）
   | "separate" // 从视频做成伴奏 / 人声
   | "video" // 下载视频
-  | "tvSync"; // 同步电视歌单（做副歌小 MV）
+  | "tvSync" // 同步电视歌单（做副歌小 MV）
+  | "singCheck" // 去演唱页唱一遍，核对歌词时间
+  | "confirmLyrics"; // 唱过了、歌词没问题：去掉「待核对」
 
 export const FIX_LABEL: Record<Fix, string> = {
   edit: "填写",
@@ -34,6 +36,8 @@ export const FIX_LABEL: Record<Fix, string> = {
   separate: "做成伴奏",
   video: "下载视频",
   tvSync: "同步电视",
+  singCheck: "去唱一遍",
+  confirmLyrics: "核对好了",
 };
 
 /** 一首歌在检查时能看到的全部东西 */
@@ -75,6 +79,7 @@ export const FIELDS: FieldDef[] = [
   { key: "title", label: "歌名", where: "sheet", input: "text", filledBy: ["user"], required: [], helps: ["tv", "learn"], fix: ["edit"], hint: "显示用的名字，改了不动文件；空着就用文件名", optional: true },
   { key: "titleReading", label: "读音", where: "sheet", input: "text", filledBy: ["user", "ai"], required: [], helps: ["tv", "learn"], fix: ["edit"], hint: "假名 / 拼音 / 罗马音，例如「さくら (Sakura)」；电视点歌首字母按里面的罗马音算", neededWhen: foreign },
   { key: "artist", label: "歌手", where: "sheet", input: "text", filledBy: ["user", "ai", "scan"], required: [], helps: ["tv", "tags", "learn"], fix: ["ai", "edit"], hint: "显示用的歌手（一般是创作者）" },
+  { key: "artistAliases", label: "歌手别名", where: "sheet", input: "text", filledBy: ["ai", "user"], required: [], helps: ["tags"], fix: ["edit"], hint: "英文名、拼音、本名，逗号隔开；国外歌词库常用英文名登记中文歌手，搜歌词用", optional: true },
   { key: "performer", label: "演唱者", where: "sheet", input: "text", filledBy: ["user", "ai"], required: [], helps: [], fix: ["edit"], hint: "和歌手不同时才填（虚拟歌手、翻唱），只作附注", optional: true },
   { key: "lang", label: "语种", where: "sheet", input: "lang", filledBy: ["user", "ai"], required: ["learn"], helps: ["tv", "tags"], fix: ["ai", "edit"] },
   { key: "era", label: "年代", where: "sheet", input: "era", filledBy: ["user", "ai"], required: [], helps: ["tv", "tags"], fix: ["ai", "edit"] },
@@ -87,7 +92,31 @@ export const FIELDS: FieldDef[] = [
   // ---- 文件（扫描得到）----
   { key: "accompaniment", label: "伴奏", where: "file", filledBy: ["tool", "user"], required: ["sing", "record", "live", "tv"], helps: [], fix: ["separate", "video"], has: (s) => s.song.accompaniments.length > 0 },
   { key: "vocal", label: "人声", where: "file", filledBy: ["tool", "user"], required: ["learn"], helps: ["sing", "record", "tv"], fix: ["separate", "video"], has: (s) => s.song.vocals.length > 0 },
-  { key: "lyrics", label: "歌词", where: "file", filledBy: ["user", "tool", "ai"], required: ["tv", "learn", "live"], helps: ["sing", "record"], fix: ["lyricsSearch", "tap"], has: (s) => s.song.lyrics !== null },
+  {
+    key: "lyrics",
+    label: "歌词",
+    where: "file",
+    filledBy: ["user", "tool", "ai"],
+    required: ["tv", "learn", "live"],
+    helps: ["sing", "record"],
+    fix: ["lyricsSearch", "tap"],
+    has: (s) => s.song.lyrics !== null,
+    // 上次搜到了但没对上（例如歌词库只有完整版），把原因写出来
+    missing: (s) => (textOf(s.row.meta, "lyricsCheck") === "failed" && textOf(s.row.meta, "lyricsNote") ? `缺歌词（${textOf(s.row.meta, "lyricsNote")}）` : "缺歌词"),
+  },
+  {
+    key: "lyricsCheck",
+    label: "歌词核对",
+    missing: (s) => `歌词待核对（${textOf(s.row.meta, "lyricsNote") || "按人声重新对过时间"}）`,
+    where: "file",
+    filledBy: ["tool", "user"],
+    required: [],
+    helps: ["sing", "tv", "live"],
+    fix: ["singCheck", "confirmLyrics"],
+    hint: "歌词库只有时长不同的版本时，按这首的人声重新对过时间；唱一遍确认对得上再点「核对好了」",
+    has: (s) => textOf(s.row.meta, "lyricsCheck") !== "pending",
+    neededWhen: (s) => s.song.lyrics !== null,
+  },
   {
     key: "lyricsTimed",
     label: "歌词时间轴",

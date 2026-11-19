@@ -150,6 +150,7 @@ export function RecordBar({ rec, canPunch, loopLabel }: Props) {
       {!rec.calibrated && rec.phase === "prep" && (
         <p className="rec-msg muted">第一次用这个耳机录音，建议先点「校准延迟」，录出来和伴奏对得更准。</p>
       )}
+      {rec.micMissing && <p className="rec-msg error-text">{rec.micMissing}</p>}
       {rec.inputWarning && <p className="rec-msg error-text">{rec.inputWarning}</p>}
       {rec.error && <p className="rec-msg error-text">{rec.error}</p>}
       {rec.notice && (

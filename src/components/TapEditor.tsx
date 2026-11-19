@@ -33,6 +33,7 @@ import { Btn, isTyping } from "./Btn";
 import { LyricsView } from "./LyricsView";
 import { Waveform } from "./Waveform";
 import { songName } from "../songs/meta";
+import { useOutputRoute } from "../audio/useOutputRoute";
 
 type Phase = "text" | "tap" | "preview";
 type Listen = "vocal" | "accompaniment" | "both";
@@ -100,7 +101,8 @@ export function TapEditor({ song, doc, player, settings, onSaved, onExit, onOpen
   useEffect(() => setPlayerRate(rate), [rate, setPlayerRate]);
   useEffect(() => () => setPlayerRate(1), [setPlayerRate]);
 
-  const latency = settings.outputLatencyMs;
+  // 选定出声设备时多出来的延迟也要扣（outputRoute）
+  const latency = settings.outputLatencyMs + useOutputRoute().extraMs;
   const heard = player.playing ? player.position - (latency / 1000) * player.rate : player.position;
   const stamp = useCallback(
     () => tapTime(player.getPosition(), player.rate, latency, settings.reactionMs),

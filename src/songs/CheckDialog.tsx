@@ -6,7 +6,8 @@ import { Btn } from "../components/Btn";
 import { AbnormalRecordings } from "./AbnormalRecordings";
 import type { MediaFile, Song } from "../types";
 import { FEATURES, FIELDS, FIX_LABEL, type Feature, type Fix, type Gap, type SongState, featureLabel, gaps, ready } from "./fields";
-import { BY_LABEL, type CheckRow, type PlanItem, songMeta, songName } from "./meta";
+import { BY_LABEL, type CheckRow, type PlanItem, songMeta, songName, textOf } from "./meta";
+import { type PendingLyrics, finishAllPending } from "./lyricsCandidates";
 import "./songs.css";
 
 interface Props {
@@ -75,10 +76,27 @@ export function CheckDialog({ open, songs, onClose, onEdit, onGoTo, onSeparate, 
     }
   };
 
+  /** 候选歌词（时长对不上的版本）按人声对齐后写入，返回一句说明 */
+  const finishLyrics = async (pending: PendingLyrics[] | undefined) => {
+    const done = await finishAllPending(pending, songs);
+    return done.map((o) => `「${songName(songs.find((x) => x.title === o.key) ?? { title: o.key, meta: null })}」${o.ok ? "歌词按人声对好了，待核对" : "歌词没写"}：${o.note}`).join("；");
+  };
+
   const aiFill = (keys: string[] | null) =>
     run(keys ? `ai:${keys[0]}` : "ai:all", async () => {
-      const r = await invoke<{ songs: number; lyrics: number }>("ai_tag_songs", { retag: false, titles: keys });
-      return r.songs === 0 ? "没有要查的（用户填过的不会再查）" : `AI 查了 ${r.songs} 首${r.lyrics ? `，找到 ${r.lyrics} 首歌词` : "，没找到合适的歌词"}`;
+      const r = await invoke<{ songs: number; lyrics: number; pendingLyrics?: PendingLyrics[] }>("ai_tag_songs", { retag: false, titles: keys });
+      const more = await finishLyrics(r.pendingLyrics);
+      const head = r.songs === 0 ? "没有要查的（用户填过的不会再查）" : `AI 查了 ${r.songs} 首${r.lyrics ? `，找到 ${r.lyrics} 首歌词` : ""}`;
+      return [head, more].filter(Boolean).join("；");
+    });
+
+  /** 已经有原曲名：直接去歌词库搜，不用再问 AI */
+  const searchLyrics = (s: SongState) =>
+    run(`ai:${s.song.title}`, async () => {
+      const r = await songMeta<{ written?: boolean; pending?: PendingLyrics; notFound?: boolean }>("lyrics_search", { key: s.song.title });
+      if (r.written) return "找到歌词了";
+      if (r.pending) return (await finishLyrics([r.pending])) || "这首已经有歌词了";
+      return "歌词库里没有对得上的歌词，只能自己贴歌词打轴";
     });
 
   const tvSync = () =>
@@ -97,8 +115,16 @@ export function CheckDialog({ open, songs, onClose, onEdit, onGoTo, onSeparate, 
       case "edit":
         return onEdit(s.song);
       case "ai":
-      case "lyricsSearch":
         return void aiFill([s.song.title]);
+      case "lyricsSearch":
+        return void (textOf(s.row.meta, "track") ? searchLyrics(s) : aiFill([s.song.title]));
+      case "singCheck":
+        return onGoTo(s.song, "sing");
+      case "confirmLyrics":
+        return void run(`ok:${s.song.title}`, async () => {
+          await songMeta("lyrics_confirm", { key: s.song.title });
+          return null;
+        });
       case "tap":
         return onGoTo(s.song, "tap");
       case "align":

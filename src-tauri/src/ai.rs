@@ -218,6 +218,8 @@ fn curl_post_via(url: &str, headers: &[(&str, &str)], body: &str, timeout_s: u32
     let mut child = Command::new("/usr/bin/curl")
         .args(["-sS", "--connect-timeout", "8", "--max-time", &timeout_s.to_string(), "-w", "\n%{http_code}", "-K", "-"])
         .args(interface.map(|i| vec!["--interface", i]).unwrap_or_default())
+        // 跟系统走时，系统 DNS 被污染就走本机解析代理（直连的不动）
+        .args(if interface.is_none() { crate::net::dns_curl_args(url) } else { Vec::new() })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

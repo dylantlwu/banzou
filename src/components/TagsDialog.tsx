@@ -21,6 +21,7 @@ import {
   type TagStore,
 } from "../tags";
 import { songName } from "../songs/meta";
+import { type PendingLyrics, finishAllPending } from "../songs/lyricsCandidates";
 import { Btn } from "./Btn";
 
 interface Props {
@@ -188,9 +189,11 @@ export function TagsDialog({ open, onClose, songs, onBusy, onOpenSettings, onTag
     setError(null);
     onBusy("打标签中…");
     try {
-      const r = await invoke<{ songs: number; lyrics: number }>("ai_tag_songs", { retag });
+      const r = await invoke<{ songs: number; lyrics: number; pendingLyrics?: PendingLyrics[] }>("ai_tag_songs", { retag });
       const n = r.songs;
-      if (r.lyrics > 0) onLibraryChanged?.();
+      // 歌词库只有时长对不上的版本：按人声对齐后写，标「待核对」（资料检查里看得到）
+      const aligned = (await finishAllPending(r.pendingLyrics, songs)).filter((o) => o.ok).length;
+      if (r.lyrics > 0 || aligned > 0) onLibraryChanged?.();
       const disk = await loadTags().catch(() => normalizeStore(null));
       apply(mergeAfterAi(disk, storeRef.current));
       const done = `打好了 ${n} 首${r.lyrics > 0 ? `，找到 ${r.lyrics} 首歌词` : ""}`;

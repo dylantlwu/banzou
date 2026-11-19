@@ -1,0 +1,12 @@
+/* 「麦克风」下拉框（MicSelect）：设置页、「声音 ▾」、直播面板、测试集录音共用 */
+.mic-select {
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+}

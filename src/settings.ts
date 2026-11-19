@@ -36,6 +36,10 @@ export interface Settings {
   liveVoiceGain: number;
   liveAccGain: number;
   liveMicId: string;
+  /** 麦克风（所有录音的地方共用）："" = 自动挑，"@system" = 跟系统设置，其它 = 设备名（`src/audio/micChoice.ts`） */
+  inputDevice: string;
+  /** 出声设备：""（没选过）/ "@system" = 跟系统设置，其它 = 设备名（outputRoute） */
+  outputDevice: string;
   /** 演唱页显示音高窗口（原唱音高 + 我唱的） */
   showPitch: boolean;
   /** 总音量 0–1（播放栏的喇叭；歌曲、老师说话都跟着它） */
@@ -72,6 +76,8 @@ export const DEFAULT_SETTINGS: Settings = {
   liveVoiceGain: 1,
   liveAccGain: 0.8,
   liveMicId: "",
+  inputDevice: "",
+  outputDevice: "",
   showPitch: true,
   masterVolume: 1,
   masterMuted: false,
@@ -121,7 +127,7 @@ export function normalizeSettings(raw: unknown): Settings {
   if (typeof obj.showPitch === "boolean") out.showPitch = obj.showPitch;
   if (typeof obj.masterMuted === "boolean") out.masterMuted = obj.masterMuted;
   if (typeof obj.tourDone === "boolean") out.tourDone = obj.tourDone;
-  for (const k of ["obsPassword", "streamServer", "streamKey", "liveMicId"] as const) {
+  for (const k of ["obsPassword", "streamServer", "streamKey", "liveMicId", "inputDevice", "outputDevice"] as const) {
     if (typeof obj[k] === "string") out[k] = (obj[k] as string).slice(0, 500);
   }
   if (obj.liveFx === null || ["clean", "pop", "warm"].includes(obj.liveFx as string)) out.liveFx = obj.liveFx as Settings["liveFx"];
