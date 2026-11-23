@@ -2,7 +2,9 @@
 
 给唱歌的人用的 macOS 应用：放伴奏、歌词跟着滚、录唱、修音、每天练声、一键开直播。
 
-> **English**: Banzou (波点) is a macOS app for singers. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. Download the latest build (Apple silicon) from [Releases](https://github.com/dylantlwu/banzou/releases/latest). It is not notarized, so on first launch allow it under System Settings → Privacy & Security → Open Anyway.
+**全部用 [Claude Code](https://claude.com/claude-code) 做的**：我用中文说想要什么，Claude Code 写代码、测试、打包，Mac 应用和电视上的 App 都是这样做出来的。
+
+> **English**: Banzou (波点) is a macOS app for singers, built entirely with [Claude Code](https://claude.com/claude-code): I described what I wanted in plain Chinese, and Claude Code wrote, tested and packaged it, including the companion TV app. It plays backing tracks with synced lyrics, records takes aligned to the original vocal, and offers auto and manual pitch correction. It also has daily vocal exercises and one-click live streaming through OBS with real-time pitch correction. The UI is in Chinese. Bring your own backing tracks and lyrics, since none are included. Download the latest build (Apple silicon) from [Releases](https://github.com/dylantlwu/banzou/releases/latest). It is not notarized, so on first launch allow it under System Settings → Privacy & Security → Open Anyway.
 
 **目录**：[安装](#安装) · [5 分钟上手](#5-分钟上手) · [准备素材](#准备素材) · [唱歌](#唱歌) · [歌词](#歌词) · [耳机延迟](#耳机延迟校准) · [录唱](#录唱) · [修音](#修音) · [练声](#练声) · [直播](#直播) · [电视 KTV](#电视-ktv) · [快捷键](#快捷键) · [常见问题](#常见问题) · [开发](#开发)
 
